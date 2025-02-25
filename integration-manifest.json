@@ -1,12 +1,49 @@
 {
-  "$schema": "https://keyfactor.github.io/integration-manifest-schema.json",
-  "integration_type": "ca-gateway",
-  "name": "<Gateway Name Here>",
-  "status": "prototype",
-  "support_level": "community",
-  "link_github": false,
-  "update_catalog": false,
-  "description": "<Description Here>",
-  "gateway_framework": "10.x.x",
-   "release_dir": "UPDATE-THIS-WITH-PATH-TO-BINARY-BUILD-FOLDER"
+    "$schema": "https://keyfactor.github.io/integration-manifest-schema.json",
+    "integration_type": "anyca-plugin",
+    "name": "CSCGlobal CAPlugin REST Gateway Plugin",
+    "status": "pilot",
+    "support_level": "kf-supported",
+    "link_github": true,
+    "update_catalog": true,
+    "description": "CSCGlobal CAPlugin for the AnyCA REST Gateway framework",
+    "gateway_framework": "24.2.0",
+    "release_project": "cscglobal-caplugin/CSCGlobalCAPlugin.csproj",
+    "release_dir": "cscglobal-caplugin/bin/Release",
+    "about": {
+        "carest": {
+            "ca_plugin_config": [
+                {
+                    "name": "CscGlobalUrl",
+                    "description": "CSCGlobal API URL"
+                },
+                {
+                    "name": "ApiKey",
+                    "description": "CSCGlobal API Key"
+                },
+                {
+                    "name": "BearerToken",
+                    "description": "CSCGlobal Bearer Token"
+                },
+                {
+                    "name": "DefaultPageSize",
+                    "description": "Default page size for use with the API. Default is 100"
+                },
+                {
+                    "name": "TemplateSync",
+                    "description": "Enable template sync."
+                }
+            ],
+            "enrollment_config": [],
+            "product_ids": [
+                "CSC TrustedSecure Premium Certificate",
+                "CSC TrustedSecure EV Certificate",
+                "CSC TrustedSecure UC Certificate",
+                "CSC TrustedSecure Premium Wildcard Certificate",
+                "CSC TrustedSecure Domain Validated SSL",
+                "CSC TrustedSecure Domain Validated Wildcard SSL",
+                "CSC TrustedSecure Domain Validated UC Certificate"
+            ]
+        }
+    }
 }

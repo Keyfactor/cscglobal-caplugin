@@ -1,0 +1,28 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.11.35327.3
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CSCGlobalCAPlugin", "cscglobal-caplugin\CSCGlobalCAPlugin.csproj", "{01DDFD6F-275D-46E7-B522-E0C965D1BF9C}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		DebugAndPush|Any CPU = DebugAndPush|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{01DDFD6F-275D-46E7-B522-E0C965D1BF9C}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{01DDFD6F-275D-46E7-B522-E0C965D1BF9C}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{01DDFD6F-275D-46E7-B522-E0C965D1BF9C}.DebugAndPush|Any CPU.ActiveCfg = DebugAndPush|Any CPU
+		{01DDFD6F-275D-46E7-B522-E0C965D1BF9C}.DebugAndPush|Any CPU.Build.0 = DebugAndPush|Any CPU
+		{01DDFD6F-275D-46E7-B522-E0C965D1BF9C}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{01DDFD6F-275D-46E7-B522-E0C965D1BF9C}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {8861D2F4-FEE8-4D70-8172-DF321704F12D}
+	EndGlobalSection
+EndGlobal

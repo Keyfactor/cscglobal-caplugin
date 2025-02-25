@@ -1,0 +1,10 @@
+{
+  "extensions": {
+    "Keyfactor.AnyGateway.Extensions.IAnyCAPlugin": {
+      "CSCGlobalCAPlugin": {
+        "assemblypath": "CSCGlobalCAPlugin.dll",
+        "TypeFullName": "Keyfactor.Extensions.CAPlugin.CSCGlobal.CSCGlobalCAPlugin"
+      }
+    }
+  }
+}

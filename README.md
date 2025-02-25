@@ -1,93 +1,301 @@
-# cpr-cagateway-template
+<h1 align="center" style="border-bottom: none">
+    CSCGlobal CA  Gateway AnyCA Gateway REST Plugin
+</h1>
 
-## Template for new CA Gateway integrations
+<p align="center">
+  <!-- Badges -->
+<img src="https://img.shields.io/badge/integration_status-pilot-3D1973?style=flat-square" alt="Integration Status: pilot" />
+<a href="https://github.com/Keyfactor/cscglobal-caplugin/releases"><img src="https://img.shields.io/github/v/release/Keyfactor/cscglobal-caplugin?style=flat-square" alt="Release" /></a>
+<img src="https://img.shields.io/github/issues/Keyfactor/cscglobal-caplugin?style=flat-square" alt="Issues" />
+<img src="https://img.shields.io/github/downloads/Keyfactor/cscglobal-caplugin/total?style=flat-square&label=downloads&color=28B905" alt="GitHub Downloads (all assets, all releases)" />
+</p>
 
-### Use this repository to create new integrations for new CA Gateway integration types. 
-
-
-1. [Use this repository](#using-the-repository)
-1. [Update the integration-manifest.json](#updating-the-integration-manifest.json)
-1. [Add Keyfactor Bootstrap Workflow (keyfactor-bootstrap-workflow.yml)](#add-bootstrap)
-1. [Create required branches](#create-required-branches)
-1. [Replace template files/folders](#replace-template-files-and-folders)
-1. [Create initial prerelease](#create-initial-prerelease)
----
-
-#### Using the repository
-1. Select the ```Use this template``` button at the top of this page
-1. Update the repository name following [these guidelines](https://keyfactorinc.sharepoint.com/sites/IntegrationWiki/SitePages/GitHub-Processes.aspx#repository-naming-conventions) 
-    1. All repositories must be in lower-case
-	1. General pattern: company-product-type
-	1. e.g. hashicorp-vault-orchestator
-1. Click the ```Create repository``` button
-
----
-
-#### Updating the integration-manifest.json
-
-*The following properties must be updated in the integration-manifest.json*
-
-Clone the repository locally, use vsdev.io, or the GitHub online editor to update the file.
-
-* "name": "Friendly name for the integration"
-	* This will be used in the readme file generation and catalog entries
-* "description": "Brief description of the integration."
-	* This will be used in the readme file generation
-	* If the repository description is empty this value will be used for the repository description upon creating a release branch
-* "release_dir": "PATH\\\TO\\\BINARY\\\RELEASE\\\OUTPUT\\\FOLDER"
-	* Path separators can be "\\\\" or "/"
-	* Be sure to specify the release folder name. This can be found by running a Release build and noting the output folder
-	* Example: "AzureAppGatewayOrchestrator\\bin\\Release"
-* "gateway_framework": "" string denoting the required command gateway framework version
----
-
-#### Add Bootstrap 
-Add Keyfactor Bootstrap Workflow (keyfactor-bootstrap-workflow.yml). This can be copied directly from the workflow templates or through the Actions tab
-* Directly:
-    1. Create a file named ```.github\workflows\keyfactor-bootstrap-workflow.yml``` 
-	1. Copy the contents of [keyfactor/.github/workflow-templates/keyfactor-bootstrap-workflow.yml](https://raw.githubusercontent.com/Keyfactor/.github/main/workflow-templates/keyfactor-bootstrap-workflow.yml) into the file created in the previous step
-* Actions tab:
-    1. Navigate to the [Actions tab](./actions) in the new repository
-	1. Click the ```New workflow``` button
-	1. Find the ```Keyfactor Bootstrap Workflow``` and click the ```Configure``` button
-	1. Click the ```Commit changes...``` button on this screen and the next to add the bootstrap workflow to the main branch
-	
-A new build will run the tasks of a *Push* trigger on the main branch
-
-*Ensure there are no errors during the workflow run in the Actions tab.*
-
----
-
-#### Create required branches 
-1. Create a release branch from main: release-1.0
-1. Create a dev branch from the starting with the devops id in the format ab#\<DevOps-ID>, e.g. ab#53535. 
-    1. For the cleanest pull request merge, create the dev branch from the release branch. 
-	1. Optionally, add a suffix to the branch name indicating initial release. e.g. ab#53535-initial-release
-
----
+<p align="center">
+  <!-- TOC -->
+  <a href="#support">
+    <b>Support</b>
+  </a> 
+  ·
+  <a href="#requirements">
+    <b>Requirements</b>
+  </a>
+  ·
+  <a href="#installation">
+    <b>Installation</b>
+  </a>
+  ·
+  <a href="#license">
+    <b>License</b>
+  </a>
+  ·
+  <a href="https://github.com/orgs/Keyfactor/repositories?q=anycagateway">
+    <b>Related Integrations</b>
+  </a>
+</p>
 
 
-#### Replace template files and folders
-1. Replace the contents of readme_source.md
-1. Create a CHANGELOG.md file in the root of the repository indicating ```1.0: Initial release```
-1. Replace the SampleOrchestratorExtension.sln solution file and SampleOrchestratorExtension folder with your new orchestrator dotnet solution
-1. Push your updates to the dev branch (ab#xxxxx)
+This integration allows for the Synchronization, Enrollment, and Revocation of certificates from the CSCGlobal. This is the AnyGateway REST version.
 
----
+## Compatibility
+
+The CSCGlobal CA  Gateway AnyCA Gateway REST plugin is compatible with the Keyfactor AnyCA Gateway REST 24.2.0 and later.
+
+## Support
+The CSCGlobal CA  Gateway AnyCA Gateway REST plugin is supported by Keyfactor for Keyfactor customers. If you have a support issue, please open a support ticket with your Keyfactor representative. If you have a support issue, please open a support ticket via the Keyfactor Support Portal at https://support.keyfactor.com. 
+
+> To report a problem or suggest a new feature, use the **[Issues](../../issues)** tab. If you want to contribute actual bug fixes or proposed enhancements, use the **[Pull requests](../../pulls)** tab.
+
+## Requirements
+
+This integration is tested and confirmed as working for Anygateway REST 24.2 and above. Notice: Keyfactor Anygateway REST 24.4 requires the use of .Net 8.
+
+## Installation
+
+1. Install the AnyCA Gateway REST per the [official Keyfactor documentation](https://software.keyfactor.com/Guides/AnyCAGatewayREST/Content/AnyCAGatewayREST/InstallIntroduction.htm).
+
+2. On the server hosting the AnyCA Gateway REST, download and unzip the latest [CSCGlobal CA  Gateway AnyCA Gateway REST plugin](https://github.com/Keyfactor/cscglobal-caplugin/releases/latest) from GitHub.
+
+3. Copy the unzipped directory (usually called `net6.0`) to the Extensions directory:
+
+    ```shell
+    Program Files\Keyfactor\AnyCA Gateway\AnyGatewayREST\net6.0\Extensions
+    ```
+
+    > The directory containing the CSCGlobal CA  Gateway AnyCA Gateway REST plugin DLLs (`net6.0`) can be named anything, as long as it is unique within the `Extensions` directory.
+
+4. Restart the AnyCA Gateway REST service.
+
+5. Navigate to the AnyCA Gateway REST portal and verify that the Gateway recognizes the CSCGlobal CA  Gateway plugin by hovering over the ⓘ symbol to the right of the Gateway on the top left of the portal.
+
+## Configuration
+
+1. Follow the [official AnyCA Gateway REST documentation](https://software.keyfactor.com/Guides/AnyCAGatewayREST/Content/AnyCAGatewayREST/AddCA-Gateway.htm) to define a new Certificate Authority, and use the notes below to configure the **Gateway Registration** and **CA Connection** tabs:
+
+    * **Gateway Registration**
+
+        The Root certificates for installation on the Anygateway server machine should be obtained from CSC.
+
+    * **CA Connection**
+
+        Populate using the configuration fields collected in the [requirements](#requirements) section.
+
+        * **CscGlobalUrl** - CSCGlobal API URL 
+        * **ApiKey** - CSCGlobal API Key 
+        * **BearerToken** - CSCGlobal Bearer Token 
+        * **DefaultPageSize** - Default page size for use with the API. Default is 100 
+        * **TemplateSync** - Enable template sync. 
+
+2. PLEASE NOTE, AT THIS TIME THE RAPID_SSL TEMPLATE IS NOT SUPPORTED BY THE CSC API AND WILL NOT WORK WITH THIS INTEGRATION
+
+    The following templates are supported. Please set up the key sizes accordingly in the Certificate Profile menu of Anygateway REST, then enter the remaining details
+    and the Enrollment Fields for each Template accordingly using the Certificate Templates section in Command:
+
+    CONFIG ELEMENT				| DESCRIPTION
+    ----------------------------|------------------
+    Template Short Name	| CSC TrustedSecure Premium Certificate
+    Template Display Name	| CSC TrustedSecure Premium Certificate
+    Friendly Name	| CSC TrustedSecure Premium Certificate
+    Keys Size  | 2048
+    Enforce RFC 2818 Compliance | True
+    CSR Enrollment | True
+    Pfx Enrollment | True
 
 
-#### Create initial prerelease
-1. Create a pull request from the dev branch to the release-1.0 branch
+    **CSC TrustedSecure Premium Certificate - Enrollment Fields**
+
+    NAME | DATA TYPE	| VALUES
+    -----|--------------|-----------------
+    Term | Multiple Choice | 12,24
+    Applicant First Name | String | N/A
+    Applicant Last Name | String | N/A
+    Applicant Email Address | String | N/A
+    Applicant Phone (+nn.nnnnnnnn) | String | N/A
+    Domain Control Validation Method | Multiple Choice | EMAIL
+    Organization Contact | Multiple Choice | Get From CSC Differs For Clients
+    Business Unit | Multiple Choice | Get From CSC Differs For Clients
+    Notification Email(s) Comma Separated | String | N/A
+    CN DCV Email (admin@yourdomain.com) | String | N/A
+
+    **CSC TrustedSecure EV Certificate - Details Tab**
+
+    CONFIG ELEMENT				| DESCRIPTION
+    ----------------------------|------------------
+    Template Short Name	| CSC TrustedSecure EV Certificate
+    Template Display Name	| CSC TrustedSecure EV Certificate
+    Friendly Name	| CSC TrustedSecure EV Certificate
+    Keys Size  | 2048
+    Enforce RFC 2818 Compliance | True
+    CSR Enrollment | True
+    Pfx Enrollment | True
 
 
-----
+    **CSC TrustedSecure EV Certificate - Enrollment Fields**
 
-When the repository is ready for SE Demo, change the following property:
-* "status": "pilot"
+    NAME | DATA TYPE	| VALUES
+    -----|--------------|-----------------
+    Term | Multiple Choice | 12,24
+    Applicant First Name | String | N/A
+    Applicant Last Name | String | N/A
+    Applicant Email Address | String | N/A
+    Applicant Phone (+nn.nnnnnnnn) | String | N/A
+    Domain Control Validation Method | Multiple Choice | EMAIL
+    Organization Contact | Multiple Choice | Get From CSC Differs For Clients
+    Business Unit | Multiple Choice | Get From CSC Differs For Clients
+    Notification Email(s) Comma Separated | String | N/A
+    CN DCV Email (admin@yourdomain.com) | String | N/A
+    Organization Country | String | N/A
 
-When the integration has been approved by Support and Delivery teams, change the following property:
-* "status": "production"
+    **CSC TrustedSecure UC Certificate - Details Tab**
 
-If the repository is ready to be published in the public catalog, the following properties must be updated:
-* "update_catalog": true
-* "link_github": true
+    CONFIG ELEMENT				| DESCRIPTION
+    ----------------------------|------------------
+    Template Short Name	| CSC TrustedSecure UC Certificate
+    Template Display Name	| CSC TrustedSecure UC Certificate
+    Friendly Name	| CSC TrustedSecure UC Certificate
+    Keys Size  | 2048
+    Enforce RFC 2818 Compliance | True
+    CSR Enrollment | True
+    Pfx Enrollment | True
+
+
+    **CSC TrustedSecure UC Certificate - Enrollment Fields**
+
+    NAME | DATA TYPE	| VALUES
+    -----|--------------|-----------------
+    Term | Multiple Choice | 12,24
+    Applicant First Name | String | N/A
+    Applicant Last Name | String | N/A
+    Applicant Email Address | String | N/A
+    Applicant Phone (+nn.nnnnnnnn) | String | N/A
+    Domain Control Validation Method | Multiple Choice | EMAIL
+    Organization Contact | Multiple Choice | Get From CSC Differs For Clients
+    Business Unit | Multiple Choice | Get From CSC Differs For Clients
+    Notification Email(s) Comma Separated | String | N/A
+    CN DCV Email (admin@yourdomain.com) | String | N/A
+    Addtl Sans Comma Separated DVC Emails | String | N/A
+    	
+
+    **CSC TrustedSecure Premium Wildcard Certificate - Details Tab**
+
+    CONFIG ELEMENT				| DESCRIPTION
+    ----------------------------|------------------
+    Template Short Name	| CSC TrustedSecure Premium Wildcard Certificate
+    Template Display Name	| CSC TrustedSecure Premium Wildcard Certificate
+    Friendly Name	| CSC TrustedSecure Premium Wildcard Certificate
+    Keys Size  | 2048
+    Enforce RFC 2818 Compliance | True
+    CSR Enrollment | True
+    Pfx Enrollment | True
+
+
+    **CSC TrustedSecure Premium Wildcard Certificate - Enrollment Fields**
+
+    NAME | DATA TYPE	| VALUES
+    -----|--------------|-----------------
+    Term | Multiple Choice | 12,24
+    Applicant First Name | String | N/A
+    Applicant Last Name | String | N/A
+    Applicant Email Address | String | N/A
+    Applicant Phone (+nn.nnnnnnnn) | String | N/A
+    Domain Control Validation Method | Multiple Choice | EMAIL
+    Organization Contact | Multiple Choice | Get From CSC Differs For Clients
+    Business Unit | Multiple Choice | Get From CSC Differs For Clients
+    Notification Email(s) Comma Separated | String | N/A
+    CN DCV Email (admin@yourdomain.com) | String | N/A
+
+    **CSC TrustedSecure Domain Validated SSL - Details Tab**
+
+    CONFIG ELEMENT				| DESCRIPTION
+    ----------------------------|------------------
+    Template Short Name	| CSC TrustedSecure Domain Validated SSL
+    Template Display Name	| CSC TrustedSecure Domain Validated SSL
+    Friendly Name	| CSC TrustedSecure Domain Validated SSL
+    Keys Size  | 2048
+    Enforce RFC 2818 Compliance | True
+    CSR Enrollment | True
+    Pfx Enrollment | True
+
+
+    **CSC TrustedSecure Domain Validated SSL - Enrollment Fields**
+
+    NAME | DATA TYPE	| VALUES
+    -----|--------------|-----------------
+    Term | Multiple Choice | 12,24
+    Applicant First Name | String | N/A
+    Applicant Last Name | String | N/A
+    Applicant Email Address | String | N/A
+    Applicant Phone (+nn.nnnnnnnn) | String | N/A
+    Domain Control Validation Method | Multiple Choice | EMAIL
+    Organization Contact | Multiple Choice | Get From CSC Differs For Clients
+    Business Unit | Multiple Choice | Get From CSC Differs For Clients
+    Notification Email(s) Comma Separated | String | N/A
+    CN DCV Email (admin@yourdomain.com) | String | N/A
+
+    **CSC TrustedSecure Domain Validated Wildcard SSL - Details Tab**
+
+    CONFIG ELEMENT				| DESCRIPTION
+    ----------------------------|------------------
+    Template Short Name	| CSC TrustedSecure Domain Validated Wildcard SSL
+    Template Display Name	| CSC TrustedSecure Domain Validated Wildcard SSL
+    Friendly Name	| CSC TrustedSecure Domain Validated Wildcard SSL
+    Keys Size  | 2048
+    Enforce RFC 2818 Compliance | True
+    CSR Enrollment | True
+    Pfx Enrollment | True
+
+
+    **CSC TrustedSecure Domain Validated Wildcard SSL - Enrollment Fields**
+
+    NAME | DATA TYPE	| VALUES
+    -----|--------------|-----------------
+    Term | Multiple Choice | 12,24
+    Applicant First Name | String | N/A
+    Applicant Last Name | String | N/A
+    Applicant Email Address | String | N/A
+    Applicant Phone (+nn.nnnnnnnn) | String | N/A
+    Domain Control Validation Method | Multiple Choice | EMAIL
+    Organization Contact | Multiple Choice | Get From CSC Differs For Clients
+    Business Unit | Multiple Choice | Get From CSC Differs For Clients
+    Notification Email(s) Comma Separated | String | N/A
+    CN DCV Email (admin@yourdomain.com) | String | N/A
+
+    **CSC TrustedSecure Domain Validated UC Certificate - Details Tab**
+
+    CONFIG ELEMENT				| DESCRIPTION
+    ----------------------------|------------------
+    Template Short Name	| CSC TrustedSecure Domain Validated UC Certificate
+    Template Display Name	| CSC TrustedSecure Domain Validated UC Certificate
+    Friendly Name	| CSC TrustedSecure Domain Validated UC Certificate
+    Keys Size  | 2048
+    Enforce RFC 2818 Compliance | True
+    CSR Enrollment | True
+    Pfx Enrollment | True
+
+
+    **CSC TrustedSecure Domain Validated UC Certificate - Enrollment Fields**
+
+    NAME | DATA TYPE	| VALUES
+    -----|--------------|-----------------
+    Term | Multiple Choice | 12,24
+    Applicant First Name | String | N/A
+    Applicant Last Name | String | N/A
+    Applicant Email Address | String | N/A
+    Applicant Phone (+nn.nnnnnnnn) | String | N/A
+    Domain Control Validation Method | Multiple Choice | EMAIL
+    Organization Contact | Multiple Choice | Get From CSC Differs For Clients
+    Business Unit | Multiple Choice | Get From CSC Differs For Clients
+    Notification Email(s) Comma Separated | String | N/A
+    CN DCV Email (admin@yourdomain.com) | String | N/A
+    Addtl Sans Comma Separated DVC Emails | String | N/A
+
+3. Follow the [official Keyfactor documentation](https://software.keyfactor.com/Guides/AnyCAGatewayREST/Content/AnyCAGatewayREST/AddCA-Keyfactor.htm) to add each defined Certificate Authority to Keyfactor Command and import the newly defined Certificate Templates.
+
+
+
+## License
+
+Apache License 2.0, see [LICENSE](LICENSE).
+
+## Related Integrations
+
+See all [Keyfactor Any CA Gateways (REST)](https://github.com/orgs/Keyfactor/repositories?q=anycagateway).
