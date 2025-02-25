@@ -87,7 +87,7 @@ This integration is tested and confirmed as working for Anygateway REST 24.2 and
 
 2. PLEASE NOTE, AT THIS TIME THE RAPID_SSL TEMPLATE IS NOT SUPPORTED BY THE CSC API AND WILL NOT WORK WITH THIS INTEGRATION
 
-    The following templates are supported. Please set up the key sizes accordingly in the Certificate Profile menu of Anygateway REST, then enter the remaining details
+    The following certificate templates are supported. Please set up the key sizes accordingly in the Certificate Profile menu of Anygateway REST, then enter the remaining details
     and the Enrollment Fields for each Template accordingly using the Certificate Templates section in Command:
 
     CONFIG ELEMENT				| DESCRIPTION
