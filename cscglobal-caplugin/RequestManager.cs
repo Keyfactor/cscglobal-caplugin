@@ -230,7 +230,7 @@ public class RequestManager
         var subjectNameList = new List<SubjectAlternativeName>();
         var methodType = productInfo.ProductParameters["Domain Control Validation Method"];
 
-        foreach (var v in sans["dns"])
+        foreach (var v in sans["dnsname"])
         {
             var domainName = v;
             var san = new SubjectAlternativeName();
