@@ -21,6 +21,8 @@ public interface ICscGlobalClient
 
     Task<CertificateResponse> SubmitGetCertificateAsync(string certificateId);
 
+	Task<List<GetCustomField>> SubmitGetCustomFields();
+
     Task<CertificateListResponse> SubmitCertificateListRequestAsync();
 
     Task<RevokeResponse> SubmitRevokeCertificateAsync(string uuId);
