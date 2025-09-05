@@ -73,12 +73,22 @@ public class RequestManager
                 StatusMessage = registrationResponse.RegistrationError.Description
             };
 
-        return new EnrollmentResult
+		Dictionary<string, string> cnames = new Dictionary<string, string>();
+		if (registrationResponse.Result.DcvDetails != null && registrationResponse.Result.DcvDetails.Count > 0)
+		{
+			foreach (var dcv in registrationResponse.Result.DcvDetails)
+			{
+				cnames.Add(dcv.CName.Name, dcv.CName.Value);
+			}
+		}
+
+		return new EnrollmentResult
         {
             Status = (int)EndEntityStatus.EXTERNALVALIDATION, //success
             CARequestID = registrationResponse.Result.Status.Uuid,
             StatusMessage =
-                $"Order Successfully Created With Order Number {registrationResponse.Result.CommonName}"
+                $"Order Successfully Created With Order Number {registrationResponse.Result.CommonName}",
+			EnrollmentContext = (cnames.Count > 0) ? cnames : null
         };
     }
 
