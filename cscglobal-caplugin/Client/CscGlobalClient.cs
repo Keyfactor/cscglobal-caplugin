@@ -134,6 +134,17 @@ public sealed class CscGlobalClient : ICscGlobalClient
         }
     }
 
+	public async Task<List<GetCustomField>> SubmitGetCustomFields()
+	{
+		using (var resp = await RestClient.GetAsync($"/dbs/api/v2/admin/customfields"))
+		{
+			resp.EnsureSuccessStatusCode();
+			var getCustomFieldsResponse =
+				JsonConvert.DeserializeObject<GetCustomFields>(await resp.Content.ReadAsStringAsync());
+			return getCustomFieldsResponse.CustomFields;
+		}
+	}
+
     public async Task<RevokeResponse> SubmitRevokeCertificateAsync(string uuId)
     {
         using (var resp = await RestClient.PutAsync($"/dbs/api/v2/tls/revoke/{uuId}", new StringContent("")))
