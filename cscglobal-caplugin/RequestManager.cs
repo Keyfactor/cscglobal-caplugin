@@ -12,6 +12,8 @@ using Keyfactor.Extensions.CAPlugin.CSCGlobal.Interfaces;
 using Keyfactor.PKI;
 using Keyfactor.PKI.Enums.EJBCA;
 
+using Org.BouncyCastle.Bcpg;
+
 namespace Keyfactor.Extensions.CAPlugin.CSCGlobal;
 
 public class RequestManager
@@ -19,9 +21,25 @@ public class RequestManager
     public static Func<string, string> Pemify = ss =>
         ss.Length <= 64 ? ss : ss.Substring(0, 64) + "\n" + Pemify(ss.Substring(64));
 
-    private List<CustomField> GetCustomFields(EnrollmentProductInfo productInfo)
+    private List<CustomField> GetCustomFields(EnrollmentProductInfo productInfo, List<GetCustomField> customFields)
     {
         var customFieldList = new List<CustomField>();
+		foreach (var field in customFields)
+		{
+			if (productInfo.ProductParameters.ContainsKey(field.Label))
+			{
+				var newField = new CustomField
+				{
+					Name = field.Label,
+					Value = productInfo.ProductParameters[field.Label]
+				};
+				customFieldList.Add(newField);
+			}
+			else if (field.Mandatory)
+			{
+				throw new Exception($"Custom field {field.Label} is marked as mandatory, but was not supplied in the request.");
+			}
+		}
         return customFieldList;
     }
 
@@ -55,12 +73,22 @@ public class RequestManager
                 StatusMessage = registrationResponse.RegistrationError.Description
             };
 
-        return new EnrollmentResult
+		Dictionary<string, string> cnames = new Dictionary<string, string>();
+		if (registrationResponse.Result.DcvDetails != null && registrationResponse.Result.DcvDetails.Count > 0)
+		{
+			foreach (var dcv in registrationResponse.Result.DcvDetails)
+			{
+				cnames.Add(dcv.CName.Name, dcv.CName.Value);
+			}
+		}
+
+		return new EnrollmentResult
         {
             Status = (int)EndEntityStatus.EXTERNALVALIDATION, //success
             CARequestID = registrationResponse.Result.Status.Uuid,
             StatusMessage =
-                $"Order Successfully Created With Order Number {registrationResponse.Result.CommonName}"
+                $"Order Successfully Created With Order Number {registrationResponse.Result.CommonName}",
+			EnrollmentContext = (cnames.Count > 0) ? cnames : null
         };
     }
 
@@ -116,7 +144,7 @@ public class RequestManager
     }
 
     public RegistrationRequest GetRegistrationRequest(EnrollmentProductInfo productInfo, string csr,
-        Dictionary<string, string[]> sans)
+        Dictionary<string, string[]> sans, List<GetCustomField> customFields)
     {
         //var cert = "-----BEGIN CERTIFICATE REQUEST-----\r\n";
         var cert = Pemify(csr);
@@ -144,7 +172,7 @@ public class RequestManager
             OrganizationContact = productInfo.ProductParameters["Organization Contact"],
             BusinessUnit = productInfo.ProductParameters["Business Unit"],
             ShowPrice = true, //User should not have to fill this out
-            CustomFields = GetCustomFields(productInfo),
+            CustomFields = GetCustomFields(productInfo, customFields),
             SubjectAlternativeNames = certificateType == "2" ? GetSubjectAlternativeNames(productInfo, sans) : null,
             EvCertificateDetails = certificateType == "3" ? GetEvCertificateDetails(productInfo) : null
         };
@@ -190,7 +218,7 @@ public class RequestManager
     }
 
     public RenewalRequest GetRenewalRequest(EnrollmentProductInfo productInfo, string uUId, string csr,
-        Dictionary<string, string[]> sans)
+        Dictionary<string, string[]> sans, List<GetCustomField> customFields)
     {
         //var cert = "-----BEGIN CERTIFICATE REQUEST-----\r\n";
         var cert = Pemify(csr);
@@ -219,7 +247,7 @@ public class RequestManager
             BusinessUnit = productInfo.ProductParameters["Business Unit"],
             ShowPrice = true,
             SubjectAlternativeNames = certificateType == "2" ? GetSubjectAlternativeNames(productInfo, sans) : null,
-            CustomFields = GetCustomFields(productInfo),
+            CustomFields = GetCustomFields(productInfo, customFields),
             EvCertificateDetails = certificateType == "3" ? GetEvCertificateDetails(productInfo) : null
         };
     }
@@ -248,7 +276,7 @@ public class RequestManager
     }
 
     public ReissueRequest GetReissueRequest(EnrollmentProductInfo productInfo, string uUId, string csr,
-        Dictionary<string, string[]> sans)
+        Dictionary<string, string[]> sans, List<GetCustomField> customFields)
     {
         //var cert = "-----BEGIN CERTIFICATE REQUEST-----\r\n";
         var cert = Pemify(csr);
@@ -277,7 +305,7 @@ public class RequestManager
             BusinessUnit = productInfo.ProductParameters["Business Unit"],
             ShowPrice = true,
             SubjectAlternativeNames = certificateType == "2" ? GetSubjectAlternativeNames(productInfo, sans) : null,
-            CustomFields = GetCustomFields(productInfo),
+            CustomFields = GetCustomFields(productInfo, customFields),
             EvCertificateDetails = certificateType == "3" ? GetEvCertificateDetails(productInfo) : null
         };
     }
