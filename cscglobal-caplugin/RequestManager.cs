@@ -12,6 +12,8 @@ using Keyfactor.Extensions.CAPlugin.CSCGlobal.Client.Models;
 using Keyfactor.Extensions.CAPlugin.CSCGlobal.Interfaces;
 using Keyfactor.PKI.Enums.EJBCA;
 
+using Org.BouncyCastle.Bcpg;
+
 namespace Keyfactor.Extensions.CAPlugin.CSCGlobal;
 
 public class RequestManager
@@ -19,7 +21,7 @@ public class RequestManager
     public static Func<string, string> Pemify = ss =>
         ss.Length <= 64 ? ss : ss.Substring(0, 64) + "\n" + Pemify(ss.Substring(64));
 
-    private List<CustomField> GetCustomFields(EnrollmentProductInfo productInfo)
+    private List<CustomField> GetCustomFields(EnrollmentProductInfo productInfo, List<GetCustomField> customFields)
     {
         var customFieldList = new List<CustomField>();
         foreach (var field in customFields)
@@ -138,7 +140,7 @@ public class RequestManager
     }
 
     public RegistrationRequest GetRegistrationRequest(EnrollmentProductInfo productInfo, string csr,
-        Dictionary<string, string[]> sans)
+        Dictionary<string, string[]> sans, List<GetCustomField> customFields)
     {
         //var cert = "-----BEGIN CERTIFICATE REQUEST-----\r\n";
         var cert = Pemify(csr);
@@ -166,7 +168,7 @@ public class RequestManager
             OrganizationContact = productInfo.ProductParameters["Organization Contact"],
             BusinessUnit = productInfo.ProductParameters["Business Unit"],
             ShowPrice = true, //User should not have to fill this out
-            CustomFields = GetCustomFields(productInfo),
+            CustomFields = GetCustomFields(productInfo, customFields),
             SubjectAlternativeNames = certificateType == "2" ? GetSubjectAlternativeNames(productInfo, sans) : null,
             EvCertificateDetails = certificateType == "3" ? GetEvCertificateDetails(productInfo) : null
         };
@@ -212,7 +214,7 @@ public class RequestManager
     }
 
     public RenewalRequest GetRenewalRequest(EnrollmentProductInfo productInfo, string uUId, string csr,
-        Dictionary<string, string[]> sans)
+        Dictionary<string, string[]> sans, List<GetCustomField> customFields)
     {
         //var cert = "-----BEGIN CERTIFICATE REQUEST-----\r\n";
         var cert = Pemify(csr);
@@ -241,7 +243,7 @@ public class RequestManager
             BusinessUnit = productInfo.ProductParameters["Business Unit"],
             ShowPrice = true,
             SubjectAlternativeNames = certificateType == "2" ? GetSubjectAlternativeNames(productInfo, sans) : null,
-            CustomFields = GetCustomFields(productInfo),
+            CustomFields = GetCustomFields(productInfo, customFields),
             EvCertificateDetails = certificateType == "3" ? GetEvCertificateDetails(productInfo) : null
         };
     }
@@ -270,7 +272,7 @@ public class RequestManager
     }
 
     public ReissueRequest GetReissueRequest(EnrollmentProductInfo productInfo, string uUId, string csr,
-        Dictionary<string, string[]> sans)
+        Dictionary<string, string[]> sans, List<GetCustomField> customFields)
     {
         //var cert = "-----BEGIN CERTIFICATE REQUEST-----\r\n";
         var cert = Pemify(csr);
@@ -299,7 +301,7 @@ public class RequestManager
             BusinessUnit = productInfo.ProductParameters["Business Unit"],
             ShowPrice = true,
             SubjectAlternativeNames = certificateType == "2" ? GetSubjectAlternativeNames(productInfo, sans) : null,
-            CustomFields = GetCustomFields(productInfo),
+            CustomFields = GetCustomFields(productInfo, customFields),
             EvCertificateDetails = certificateType == "3" ? GetEvCertificateDetails(productInfo) : null
         };
     }

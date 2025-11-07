@@ -210,7 +210,7 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
                 IRegistrationResponse enrollmentResponse;
                 if (!productInfo.ProductParameters.ContainsKey("PriorCertSN"))
                 {
-                    enrollmentRequest = _requestManager.GetRegistrationRequest(productInfo, csr, san);
+                    enrollmentRequest = _requestManager.GetRegistrationRequest(productInfo, csr, san, customFields);
                     Logger.LogTrace($"Enrollment Request JSON: {JsonConvert.SerializeObject(enrollmentRequest)}");
                     enrollmentResponse =
                         Task.Run(async () => await CscGlobalClient.SubmitRegistrationAsync(enrollmentRequest))
@@ -252,7 +252,7 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
                         uUId = await _certificateDataReader.GetRequestIDBySerialNumber(
                             productInfo.ProductParameters["PriorCertSN"]);
                         Logger.LogTrace($"Renew uUId: {uUId}");
-                        renewRequest = _requestManager.GetRenewalRequest(productInfo, uUId, csr, san);
+                        renewRequest = _requestManager.GetRenewalRequest(productInfo, uUId, csr, san, customFields);
                         Logger.LogTrace($"Renewal Request JSON: {JsonConvert.SerializeObject(renewRequest)}");
                         var renewResponse = Task.Run(async () => await CscGlobalClient.SubmitRenewalAsync(renewRequest))
                             .Result;
@@ -277,7 +277,7 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
                         productInfo.ProductParameters["PriorCertSN"]);
                     uUId = requestid.Substring(0, 36); //uUId is a GUID
                     Logger.LogTrace($"Reissue uUId: {uUId}");
-                    reissueRequest = _requestManager.GetReissueRequest(productInfo, uUId, csr, san);
+                    reissueRequest = _requestManager.GetReissueRequest(productInfo, uUId, csr, san, customFields);
                     Logger.LogTrace($"Reissue JSON: {JsonConvert.SerializeObject(reissueRequest)}");
                     var reissueResponse = Task.Run(async () => await CscGlobalClient.SubmitReissueAsync(reissueRequest))
                         .Result;
