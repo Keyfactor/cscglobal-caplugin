@@ -16,9 +16,6 @@ public class Constants
     public static string TemplateSync = "TemplateSync";
 }
 
-
-
-
 public static class EnrollmentConfigConstants
 {
     public const string LastName = "LastName";

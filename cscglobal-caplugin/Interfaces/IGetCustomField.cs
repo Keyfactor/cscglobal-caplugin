@@ -7,8 +7,8 @@
 
 namespace Keyfactor.Extensions.CAPlugin.CSCGlobal.Interfaces;
 
-public interface ICustomField
+public interface IGetCustomField
 {
-    string Name { get; set; }
-    string Value { get; set; }
+    string Label { get; set; }
+    bool Mandatory { get; set; }
 }

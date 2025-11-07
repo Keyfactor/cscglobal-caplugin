@@ -4,12 +4,12 @@
 // Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the specific language governing permissions
 // and limitations under the License.
+
 using System.Net.Mail;
 using System.Text;
 using Keyfactor.AnyGateway.Extensions;
 using Keyfactor.Extensions.CAPlugin.CSCGlobal.Client.Models;
 using Keyfactor.Extensions.CAPlugin.CSCGlobal.Interfaces;
-using Keyfactor.PKI;
 using Keyfactor.PKI.Enums.EJBCA;
 
 namespace Keyfactor.Extensions.CAPlugin.CSCGlobal;
@@ -22,6 +22,22 @@ public class RequestManager
     private List<CustomField> GetCustomFields(EnrollmentProductInfo productInfo)
     {
         var customFieldList = new List<CustomField>();
+        foreach (var field in customFields)
+            if (productInfo.ProductParameters.ContainsKey(field.Label))
+            {
+                var newField = new CustomField
+                {
+                    Name = field.Label,
+                    Value = productInfo.ProductParameters[field.Label]
+                };
+                customFieldList.Add(newField);
+            }
+            else if (field.Mandatory)
+            {
+                throw new Exception(
+                    $"Custom field {field.Label} is marked as mandatory, but was not supplied in the request.");
+            }
+
         return customFieldList;
     }
 
@@ -55,12 +71,18 @@ public class RequestManager
                 StatusMessage = registrationResponse.RegistrationError.Description
             };
 
+        var cnames = new Dictionary<string, string>();
+        if (registrationResponse.Result.DcvDetails != null && registrationResponse.Result.DcvDetails.Count > 0)
+            foreach (var dcv in registrationResponse.Result.DcvDetails)
+                cnames.Add(dcv.CName.Name, dcv.CName.Value);
+
         return new EnrollmentResult
         {
             Status = (int)EndEntityStatus.EXTERNALVALIDATION, //success
             CARequestID = registrationResponse.Result.Status.Uuid,
             StatusMessage =
-                $"Order Successfully Created With Order Number {registrationResponse.Result.CommonName}"
+                $"Order Successfully Created With Order Number {registrationResponse.Result.CommonName}",
+            EnrollmentContext = cnames.Count > 0 ? cnames : null
         };
     }
 
