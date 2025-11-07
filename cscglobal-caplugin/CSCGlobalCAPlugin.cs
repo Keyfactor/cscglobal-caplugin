@@ -124,7 +124,7 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
                             Logger.LogTrace($"File Content {fileContent}");
                             var certData = fileContent.Replace("\r\n", string.Empty);
                             var certString = GetEndEntityCertificate(certData);
-                            var currentCert = new X509Certificate2(Encoding.ASCII.GetBytes(certString));
+                            //var currentCert = new X509Certificate2(Encoding.ASCII.GetBytes(certString));
                             if (certString.Length > 0)
                                 blockingBuffer.Add(new AnyCAPluginCertificate
                                 {
