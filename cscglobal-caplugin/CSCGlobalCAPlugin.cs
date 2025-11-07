@@ -5,14 +5,6 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the specific language governing permissions
 // and limitations under the License.
 
-using System;
-using System.Collections.Concurrent;
-using System.Collections.Generic;
-using System.Net.Http;
-using System.Security.Cryptography.X509Certificates;
-using System.Text;
-using System.Threading;
-using System.Threading.Tasks;
 using Keyfactor.AnyGateway.Extensions;
 using Keyfactor.Extensions.CAPlugin.CSCGlobal.Client;
 using Keyfactor.Extensions.CAPlugin.CSCGlobal.Client.Models;
@@ -22,7 +14,11 @@ using Keyfactor.PKI.Enums.EJBCA;
 using Keyfactor.PKI.X509;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
-using Org.BouncyCastle.Pqc.Crypto.Lms;
+using System.Collections.Concurrent;
+using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
+using System.Text;
+using System.Text.RegularExpressions;
 
 namespace Keyfactor.Extensions.CAPlugin.CSCGlobal;
 
@@ -64,7 +60,7 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
             var certificateResponse =
                 Task.Run(async () => await CscGlobalClient.SubmitGetCertificateAsync(keyfactorCaId))
                     .Result;
-            
+
             Logger.LogTrace($"Single Cert JSON: {JsonConvert.SerializeObject(certificateResponse)}");
 
             var fileContent =
@@ -120,8 +116,8 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
                         if (EnableTemplateSync) productId = currentResponseItem?.CertificateType;
 
                         var fileContent =
-                            Encoding.ASCII.GetString(
-                                Convert.FromBase64String(currentResponseItem?.Certificate ?? string.Empty));
+                            PreparePemTextFromApi(
+                                currentResponseItem?.Certificate ?? string.Empty);
 
                         if (fileContent.Length > 0)
                         {
@@ -176,7 +172,8 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
 
             if (revokeResult == (int)EndEntityStatus.FAILED)
                 if (!string.IsNullOrEmpty(revokeResponse?.RegistrationError?.Description))
-                    throw new HttpRequestException($"Revoke Failed with message {revokeResponse?.RegistrationError?.Description}");
+                    throw new HttpRequestException(
+                        $"Revoke Failed with message {revokeResponse?.RegistrationError?.Description}");
 
             return revokeResult;
         }
@@ -203,9 +200,9 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
         }
 
         string uUId;
-		var customFields = await CscGlobalClient.SubmitGetCustomFields();
+        var customFields = await CscGlobalClient.SubmitGetCustomFields();
 
-		switch (enrollmentType)
+        switch (enrollmentType)
         {
             case EnrollmentType.New:
                 Logger.LogTrace("Entering New Enrollment");
@@ -396,37 +393,177 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
 
     #region PRIVATE
 
-    //potential issues
-    private string GetEndEntityCertificate(string certData)
-    {
-        var splitCerts =
-            certData.Split(new[] { "-----END CERTIFICATE-----", "-----BEGIN CERTIFICATE-----" },
-                StringSplitOptions.RemoveEmptyEntries);
+    //Trying to fix leaf extraction
+    private static readonly Regex PemBlock = new(
+        "-----BEGIN CERTIFICATE-----\\s*(?<b64>[A-Za-z0-9+/=\\r\\n]+?)\\s*-----END CERTIFICATE-----",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.Singleline);
 
-        X509Certificate2Collection col = new X509Certificate2Collection();
-        foreach (var cert in splitCerts)
+    private static readonly Regex Ws = new("\\s+", RegexOptions.Compiled);
+
+    /// <summary>
+    /// Returns the end-entity certificate as Base64 DER (no PEM headers), or "" if none could be found.
+    /// </summary>
+    public string GetEndEntityCertificate(string pemChain)
+    {
+        if (string.IsNullOrWhiteSpace(pemChain))
         {
-            Logger.LogTrace($"Split Cert Value: {cert}");
-            //skip these headers that came with the split function
-            if (!cert.Contains(".crt"))
+            Logger.LogWarning("Empty PEM input.");
+            return string.Empty;
+        }
+
+        // 1) Extract certs block-by-block, ignoring any garbage outside of valid fences.
+        var certs = ExtractCertificates(pemChain);
+        if (certs.Count == 0)
+        {
+            Logger.LogWarning("No valid certificate blocks found in input.");
+            return string.Empty;
+        }
+
+        // 2) Pick the leaf (end-entity).
+        var leaf = FindLeaf(certs);
+        if (leaf is null)
+        {
+            Logger.LogWarning("Could not determine end-entity certificate from the provided chain.");
+            return string.Empty;
+        }
+
+        try
+        {
+            // 3) Export to DER and Base64 (no headers).
+            byte[] der = leaf.Export(X509ContentType.Cert);
+            string b64 = Convert.ToBase64String(der);
+            Logger.LogTrace("End-entity certificate exported successfully.");
+            return b64;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to export end-entity certificate.");
+            return string.Empty;
+        }
+        finally
+        {
+            // Dispose everything we created.
+            foreach (var c in certs) c.Dispose();
+        }
+    }
+
+    private List<X509Certificate2> ExtractCertificates(string pem)
+    {
+        var results = new List<X509Certificate2>();
+
+        foreach (Match m in PemBlock.Matches(pem))
+        {
+            string b64 = m.Groups["b64"].Value;
+            if (string.IsNullOrWhiteSpace(b64))
             {
-                col.Import(Encoding.UTF8.GetBytes(cert));
+                Logger.LogTrace("Skipping empty PEM block.");
+                continue;
+            }
+
+            // Normalize: remove all whitespace and non-base64 spacers that sometimes creep in
+            b64 = Ws.Replace(b64, string.Empty);
+
+            // Strict Base64 decode with validation.
+            try
+            {
+                // Convert.TryFromBase64String is fast and avoids temporary arrays when possible
+                if (!Convert.TryFromBase64String(b64, new Span<byte>(new byte[GetDecodedLength(b64)]), out int bytesWritten))
+                {
+                    // Fallback to FromBase64String to trigger a clear exception path
+                    var discard = Convert.FromBase64String(b64);
+                    bytesWritten = discard.Length; // unreachable if invalid
+                }
+
+                byte[] der = Convert.FromBase64String(b64);
+                var cert = new X509Certificate2(der);
+                results.Add(cert);
+                Logger.LogTrace($"Imported certificate: Subject='{cert.Subject}', Issuer='{cert.Issuer}'");
+            }
+            catch (FormatException fex)
+            {
+                Logger.LogWarning(fex, "Invalid Base64 inside a PEM block; skipping this block.");
+            }
+            catch (CryptographicException cex)
+            {
+                Logger.LogWarning(cex, "DER payload failed to parse as X509; skipping this block.");
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning(ex, "Unexpected error while parsing a PEM block; skipping this block.");
             }
         }
-        Logger.LogTrace("Getting End Entity Certificate");
-        var currentCert = X509Utilities.ExtractEndEntityCertificateContents(ExportCollectionToPem(col), "");
-        Logger.LogTrace("Converting to Byte Array");
-        var byteArray = currentCert?.Export(X509ContentType.Cert);
-        Logger.LogTrace("Initializing empty string");
-        var certString = string.Empty;
-        if (byteArray != null)
-        {
-            certString = Convert.ToBase64String(byteArray);
-        }
-        Logger.LogTrace($"Got certificate {certString}");
 
-        return certString;
+        return results;
     }
+
+    // Heuristic leaf selection:
+    //  - Prefer a certificate with CA=false (BasicConstraints) and whose Subject is not an Issuer of any other cert.
+    //  - If multiple, prefer the one whose Subject does not appear as any Issuer at all.
+    //  - As a last resort, pick the one with the longest chain distance (i.e., not issuing others).
+    private X509Certificate2? FindLeaf(IReadOnlyList<X509Certificate2> certs)
+    {
+        // Build sets for quick lookups
+        var issuers = new HashSet<string>(certs.Select(c => c.Issuer), StringComparer.OrdinalIgnoreCase);
+        var subjects = new HashSet<string>(certs.Select(c => c.Subject), StringComparer.OrdinalIgnoreCase);
+
+        bool IsCa(X509Certificate2 c)
+        {
+            try
+            {
+                var bc = c.Extensions["2.5.29.19"]; // Basic Constraints
+                if (bc is X509BasicConstraintsExtension bce)
+                    return bce.CertificateAuthority;
+            }
+            catch { /* ignore and treat as unknown */ }
+            return false; // if unknown, bias towards non-CA for end-entity picking
+        }
+
+        // Candidates that do not issue others (their Subject is not an Issuer of any other).
+        var nonIssuers = certs.Where(c =>
+            !certs.Any(o => !ReferenceEquals(o, c) && string.Equals(o.Issuer, c.Subject, StringComparison.OrdinalIgnoreCase))
+        ).ToList();
+
+        // Prefer non-CA among non-issuers
+        var nonIssuerNonCa = nonIssuers.Where(c => !IsCa(c)).ToList();
+        if (nonIssuerNonCa.Count == 1) return nonIssuerNonCa[0];
+        if (nonIssuerNonCa.Count > 1)
+        {
+            // If multiple, pick the one whose subject appears least as an issuer (tie-breaker unnecessary here since nonIssuers already exclude issuers).
+            return nonIssuerNonCa[0];
+        }
+
+        // If that failed, pick any non-CA that is not an issuer in the set of all issuers
+        var anyNonCa = certs.Where(c => !IsCa(c)).ToList();
+        if (anyNonCa.Count == 1) return anyNonCa[0];
+        if (anyNonCa.Count > 1)
+        {
+            // Prefer one whose subject is not equal to any issuer (a stricter non-issuer check across entire set)
+            var strict = anyNonCa.FirstOrDefault(c => !issuers.Contains(c.Subject));
+            if (strict != null) return strict;
+
+            return anyNonCa[0];
+        }
+
+        // Last resort: pick the cert that issues nobody else (even if CA=true)
+        if (nonIssuers.Count > 0) return nonIssuers[0];
+
+        // Give up
+        return null;
+    }
+
+    private static int GetDecodedLength(string b64)
+    {
+        // Approximate decoded length: 3/4 of input, minus padding effect
+        int len = b64.Length;
+        int padding = 0;
+        if (len >= 2)
+        {
+            if (b64[^1] == '=') padding++;
+            if (b64[^2] == '=') padding++;
+        }
+        return Math.Max(0, (len / 4) * 3 - padding);
+    }
+
     private string ExportCollectionToPem(X509Certificate2Collection collection)
     {
         var pemBuilder = new StringBuilder();
@@ -440,10 +577,50 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
 
         return pemBuilder.ToString();
     }
+    private static readonly Encoding Utf8Strict = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
+    private static readonly Encoding Latin1 = Encoding.GetEncoding("ISO-8859-1");
 
-    #endregion
+    private string PreparePemTextFromApi(string? base64)
+    {
+        if (string.IsNullOrWhiteSpace(base64))
+            return string.Empty;
 
-    #region PUBLIC
+        byte[] raw;
+        try
+        {
+            raw = Convert.FromBase64String(base64);
+        }
+        catch (FormatException)
+        {
+            // Not even Base64; nothing we can do.
+            return string.Empty;
+        }
+
+        // Try UTF-8 first (strict); if it fails, decode as Latin-1 to avoid loss.
+        string text;
+        try
+        {
+            text = Utf8Strict.GetString(raw);
+        }
+        catch (DecoderFallbackException)
+        {
+            text = Latin1.GetString(raw);
+        }
+
+        // Drop UTF-8/UTF-16 BOMs if present
+        if (text.Length > 0 && text[0] == '\uFEFF') text = text[1..];
+
+        // Normalize line endings to '\n' (keep line structure!)
+        text = text.Replace("\r\n", "\n").Replace("\r", "\n");
+
+        // Remove NUL and non-printable control chars, but keep \n and \t
+        text = new string(text.Where(ch =>
+            ch == '\n' || ch == '\t' || (ch >= ' ' && ch != '\u007F')
+        ).ToArray());
+
+        return text;
+    }
+
 
     #endregion
 }
