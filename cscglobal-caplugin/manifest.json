@@ -1,4 +1,4 @@
-{
+   {
   "extensions": {
     "Keyfactor.AnyGateway.Extensions.IAnyCAPlugin": {
       "CSCGlobalCAPlugin": {

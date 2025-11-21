@@ -34,7 +34,56 @@
                     "description": "Enable template sync."
                 }
             ],
-            "enrollment_config": [],
+            "enrollment_config": [
+                {
+                    "name": "Term",
+                    "description": "OPTIONAL: Certificate term (e.g. 12 or 24 months)"
+                },
+                {
+                    "name": "Applicant First Name",
+                    "description": "OPTIONAL: Applicant First Name"
+                },
+                {
+                    "name": "Applicant Last Name",
+                    "description": "OPTIONAL: Applicant Last Name"
+                },
+                {
+                    "name": "Applicant Email Address",
+                    "description": "OPTIONAL: Applicant Email Address"
+                },
+                {
+                    "name": "Applicant Phone",
+                    "description": "OPTIONAL: Applicant Phone (+nn.nnnnnnnn)"
+                },
+                {
+                    "name": "Domain Control Validation Method",
+                    "description": "OPTIONAL: Domain Control Validation Method (e.g. EMAIL)"
+                },
+                {
+                    "name": "Organization Contact",
+                    "description": "OPTIONAL: Organization Contact (selected from CSC configuration)"
+                },
+                {
+                    "name": "Business Unit",
+                    "description": "OPTIONAL: Business Unit (selected from CSC configuration)"
+                },
+                {
+                    "name": "Notification Email(s) Comma Separated",
+                    "description": "OPTIONAL: Notification Email(s), comma separated"
+                },
+                {
+                    "name": "CN DCV Email",
+                    "description": "OPTIONAL: CN DCV Email (e.g. admin@yourdomain.com)"
+                },
+                {
+                    "name": "Organization Country",
+                    "description": "OPTIONAL: Organization Country"
+                },
+                {
+                    "name": "Addtl Sans Comma Separated DCV Emails",
+                    "description": "OPTIONAL: Additional SANs DCV Emails, comma separated"
+                }
+            ],
             "product_ids": [
                 "CSC TrustedSecure Premium Certificate",
                 "CSC TrustedSecure EV Certificate",
