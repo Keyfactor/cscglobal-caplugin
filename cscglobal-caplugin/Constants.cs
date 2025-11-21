@@ -15,26 +15,33 @@ public class Constants
     public static string DefaultPageSize = "DefaultPageSize";
     public static string TemplateSync = "TemplateSync";
 }
-
-public static class EnrollmentConfigConstants
+    
+public class ProductIDs
 {
-    public const string LastName = "LastName";
-    public const string FirstName = "FirstName";
-    public const string Email = "Email";
-    public const string Phone = "Phone";
+    public static List<String> productIds = new List<string>()
+    {
+        "CSC TrustedSecure Premium Certificate",
+        "CSC TrustedSecure EV Certificate",
+        "CSC TrustedSecure UC Certificate",
+        "CSC TrustedSecure Premium Wildcard Certificate",
+        "CSC TrustedSecure Domain Validated SSL",
+        "CSC TrustedSecure Domain Validated Wildcard SSL",
+        "CSC TrustedSecure Domain Validated UC Certificate"
+    };
+}
 
-    public const string OrganizationName = "OrganizationName";
-    public const string OrganizationAddress = "OrganizationAddress";
-    public const string OrganizationCity = "OrganizationCity";
-    public const string OrganizationState = "OrganizationState";
-    public const string OrganizationCountry = "OrganizationCountry";
-    public const string OrganizationPhone = "OrganizationPhone";
-
-    public const string JobTitle = "JobTitle";
-    public const string RegistrationAgent = "RegistrationAgent";
-    public const string RegistrationNumber = "RegistrationNumber";
-
-    public const string RootCAType = "RootCAType";
-    public const string SlotSize = "SlotSize";
-    public const string CertificateValidityInYears = "CertificateValidityInYears";
+public class EnrollmentConfigConstants
+{
+    public const string Term = "Term";
+    public const string ApplicantFirstName = "Applicant First Name";
+    public const string ApplicantLastName = "Applicant Last Name";
+    public const string ApplicantEmailAddress = "Applicant Email Address";
+    public const string ApplicantPhone = "Applicant Phone";
+    public const string DomainControlValidationMethod = "Domain Control Validation Method";
+    public const string OrganizationContact = "Organization Contact";
+    public const string BusinessUnit = "Business Unit";
+    public const string NotificationEmailsCommaSeparated = "Notification Email(s) Comma Separated";
+    public const string CnDcvEmail = "CN DCV Email";
+    public const string OrganizationCountry = "Organization Country";
+    public const string AdditionalSansCommaSeparatedDcvEmails = "Addtl Sans Comma Separated DCV Emails";
 }

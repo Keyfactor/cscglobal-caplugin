@@ -5,20 +5,19 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the specific language governing permissions
 // and limitations under the License.
 
+using System.Collections.Concurrent;
+using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
+using System.Text;
+using System.Text.RegularExpressions;
 using Keyfactor.AnyGateway.Extensions;
 using Keyfactor.Extensions.CAPlugin.CSCGlobal.Client;
 using Keyfactor.Extensions.CAPlugin.CSCGlobal.Client.Models;
 using Keyfactor.Extensions.CAPlugin.CSCGlobal.Interfaces;
 using Keyfactor.Logging;
 using Keyfactor.PKI.Enums.EJBCA;
-using Keyfactor.PKI.X509;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
-using System.Collections.Concurrent;
-using System.Security.Cryptography;
-using System.Security.Cryptography.X509Certificates;
-using System.Text;
-using System.Text.RegularExpressions;
 
 namespace Keyfactor.Extensions.CAPlugin.CSCGlobal;
 
@@ -324,6 +323,13 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
     public async Task ValidateProductInfo(EnrollmentProductInfo productInfo,
         Dictionary<string, object> connectionInfo)
     {
+        var certType = ProductIDs.productIds.Find(x =>
+            x.Equals(productInfo.ProductID, StringComparison.InvariantCultureIgnoreCase));
+
+        if (certType == null) throw new ArgumentException($"Cannot find {productInfo.ProductID}", "ProductId");
+
+        Logger.LogInformation($"Validated {certType} ({certType})configured for AnyGateway");
+
     }
 
     //done
@@ -372,23 +378,111 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
     //done
     public Dictionary<string, PropertyConfigInfo> GetTemplateParameterAnnotations()
     {
-        return new Dictionary<string, PropertyConfigInfo>();
+        return new Dictionary<string, PropertyConfigInfo>
+        {
+            [EnrollmentConfigConstants.Term] = new()
+            {
+                Comments = "OPTIONAL: Certificate term (e.g. 12 or 24 months)",
+                Hidden = false,
+                DefaultValue = string.Empty,
+                Type = "Number"
+            },
+
+            [EnrollmentConfigConstants.ApplicantFirstName] = new()
+            {
+                Comments = "OPTIONAL: Applicant First Name",
+                Hidden = false,
+                DefaultValue = string.Empty,
+                Type = "String"
+            },
+
+            [EnrollmentConfigConstants.ApplicantLastName] = new()
+            {
+                Comments = "OPTIONAL: Applicant Last Name",
+                Hidden = false,
+                DefaultValue = string.Empty,
+                Type = "String"
+            },
+
+            [EnrollmentConfigConstants.ApplicantEmailAddress] = new()
+            {
+                Comments = "OPTIONAL: Applicant Email Address",
+                Hidden = false,
+                DefaultValue = string.Empty,
+                Type = "String"
+            },
+
+            [EnrollmentConfigConstants.ApplicantPhone] = new()
+            {
+                Comments = "OPTIONAL: Applicant Phone (+nn.nnnnnnnn)",
+                Hidden = false,
+                DefaultValue = string.Empty,
+                Type = "String"
+            },
+
+            [EnrollmentConfigConstants.DomainControlValidationMethod] = new()
+            {
+                Comments = "OPTIONAL: Domain Control Validation Method (e.g. EMAIL)",
+                Hidden = false,
+                DefaultValue = string.Empty,
+                Type = "String"
+            },
+
+            [EnrollmentConfigConstants.OrganizationContact] = new()
+            {
+                Comments = "OPTIONAL: Organization Contact (selected from CSC configuration)",
+                Hidden = false,
+                DefaultValue = string.Empty,
+                Type = "String"
+            },
+
+            [EnrollmentConfigConstants.BusinessUnit] = new()
+            {
+                Comments = "OPTIONAL: Business Unit (selected from CSC configuration)",
+                Hidden = false,
+                DefaultValue = string.Empty,
+                Type = "String"
+            },
+
+            [EnrollmentConfigConstants.NotificationEmailsCommaSeparated] = new()
+            {
+                Comments = "OPTIONAL: Notification Email(s), comma separated",
+                Hidden = false,
+                DefaultValue = string.Empty,
+                Type = "String"
+            },
+
+            [EnrollmentConfigConstants.CnDcvEmail] = new()
+            {
+                Comments = "OPTIONAL: CN DCV Email (e.g. admin@yourdomain.com)",
+                Hidden = false,
+                DefaultValue = string.Empty,
+                Type = "String"
+            },
+
+            [EnrollmentConfigConstants.OrganizationCountry] = new()
+            {
+                Comments = "OPTIONAL: Organization Country",
+                Hidden = false,
+                DefaultValue = string.Empty,
+                Type = "String"
+            },
+
+            [EnrollmentConfigConstants.AdditionalSansCommaSeparatedDcvEmails] = new()
+            {
+                Comments = "OPTIONAL: Additional SANs DCV Emails, comma separated",
+                Hidden = false,
+                DefaultValue = string.Empty,
+                Type = "String"
+            }
+        };
     }
 
     //done
     public List<string> GetProductIds()
     {
-        var ProductIDs = new List<string>
-        {
-            "CSC TrustedSecure Premium Certificate",
-            "CSC TrustedSecure EV Certificate",
-            "CSC TrustedSecure UC Certificate",
-            "CSC TrustedSecure Premium Wildcard Certificate",
-            "CSC TrustedSecure Domain Validated SSL",
-            "CSC TrustedSecure Domain Validated Wildcard SSL",
-            "CSC TrustedSecure Domain Validated UC Certificate"
-        };
-        return ProductIDs;
+
+        return ProductIDs.productIds;
     }
 
     #region PRIVATE
@@ -401,7 +495,7 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
     private static readonly Regex Ws = new("\\s+", RegexOptions.Compiled);
 
     /// <summary>
-    /// Returns the end-entity certificate as Base64 DER (no PEM headers), or "" if none could be found.
+    ///     Returns the end-entity certificate as Base64 DER (no PEM headers), or "" if none could be found.
     /// </summary>
     public string GetEndEntityCertificate(string pemChain)
     {
@@ -430,8 +524,8 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
         try
         {
             // 3) Export to DER and Base64 (no headers).
-            byte[] der = leaf.Export(X509ContentType.Cert);
-            string b64 = Convert.ToBase64String(der);
+            var der = leaf.Export(X509ContentType.Cert);
+            var b64 = Convert.ToBase64String(der);
             Logger.LogTrace("End-entity certificate exported successfully.");
             return b64;
         }
@@ -453,7 +547,7 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
 
         foreach (Match m in PemBlock.Matches(pem))
         {
-            string b64 = m.Groups["b64"].Value;
+            var b64 = m.Groups["b64"].Value;
             if (string.IsNullOrWhiteSpace(b64))
             {
                 Logger.LogTrace("Skipping empty PEM block.");
@@ -467,14 +561,15 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
             try
             {
                 // Convert.TryFromBase64String is fast and avoids temporary arrays when possible
-                if (!Convert.TryFromBase64String(b64, new Span<byte>(new byte[GetDecodedLength(b64)]), out int bytesWritten))
+                if (!Convert.TryFromBase64String(b64, new Span<byte>(new byte[GetDecodedLength(b64)]),
+                        out var bytesWritten))
                 {
                     // Fallback to FromBase64String to trigger a clear exception path
                     var discard = Convert.FromBase64String(b64);
                     bytesWritten = discard.Length; // unreachable if invalid
                 }
 
-                byte[] der = Convert.FromBase64String(b64);
+                var der = Convert.FromBase64String(b64);
                 var cert = new X509Certificate2(der);
                 results.Add(cert);
                 Logger.LogTrace($"Imported certificate: Subject='{cert.Subject}', Issuer='{cert.Issuer}'");
@@ -514,23 +609,26 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
                 if (bc is X509BasicConstraintsExtension bce)
                     return bce.CertificateAuthority;
             }
-            catch { /* ignore and treat as unknown */ }
+            catch
+            {
+                /* ignore and treat as unknown */
+            }
+
             return false; // if unknown, bias towards non-CA for end-entity picking
         }
 
         // Candidates that do not issue others (their Subject is not an Issuer of any other).
         var nonIssuers = certs.Where(c =>
-            !certs.Any(o => !ReferenceEquals(o, c) && string.Equals(o.Issuer, c.Subject, StringComparison.OrdinalIgnoreCase))
+            !certs.Any(o =>
+                !ReferenceEquals(o, c) && string.Equals(o.Issuer, c.Subject, StringComparison.OrdinalIgnoreCase))
         ).ToList();
 
         // Prefer non-CA among non-issuers
         var nonIssuerNonCa = nonIssuers.Where(c => !IsCa(c)).ToList();
         if (nonIssuerNonCa.Count == 1) return nonIssuerNonCa[0];
         if (nonIssuerNonCa.Count > 1)
-        {
             // If multiple, pick the one whose subject appears least as an issuer (tie-breaker unnecessary here since nonIssuers already exclude issuers).
             return nonIssuerNonCa[0];
-        }
 
         // If that failed, pick any non-CA that is not an issuer in the set of all issuers
         var anyNonCa = certs.Where(c => !IsCa(c)).ToList();
@@ -554,14 +652,15 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
     private static int GetDecodedLength(string b64)
     {
         // Approximate decoded length: 3/4 of input, minus padding effect
-        int len = b64.Length;
-        int padding = 0;
+        var len = b64.Length;
+        var padding = 0;
         if (len >= 2)
         {
             if (b64[^1] == '=') padding++;
             if (b64[^2] == '=') padding++;
         }
-        return Math.Max(0, (len / 4) * 3 - padding);
+
+        return Math.Max(0, len / 4 * 3 - padding);
     }
 
     private string ExportCollectionToPem(X509Certificate2Collection collection)
@@ -577,7 +676,8 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
 
         return pemBuilder.ToString();
     }
-    private static readonly Encoding Utf8Strict = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
+
+    private static readonly Encoding Utf8Strict = new UTF8Encoding(false, true);
     private static readonly Encoding Latin1 = Encoding.GetEncoding("ISO-8859-1");
 
     private string PreparePemTextFromApi(string? base64)
@@ -620,7 +720,6 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
 
         return text;
     }
-
 
     #endregion
 }

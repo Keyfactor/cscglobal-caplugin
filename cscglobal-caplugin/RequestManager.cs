@@ -12,8 +12,6 @@ using Keyfactor.Extensions.CAPlugin.CSCGlobal.Client.Models;
 using Keyfactor.Extensions.CAPlugin.CSCGlobal.Interfaces;
 using Keyfactor.PKI.Enums.EJBCA;
 
-using Org.BouncyCastle.Bcpg;
-
 namespace Keyfactor.Extensions.CAPlugin.CSCGlobal;
 
 public class RequestManager
@@ -76,8 +74,18 @@ public class RequestManager
         var cnames = new Dictionary<string, string>();
         if (registrationResponse.Result.DcvDetails != null && registrationResponse.Result.DcvDetails.Count > 0)
             foreach (var dcv in registrationResponse.Result.DcvDetails)
-                cnames.Add(dcv.CName.Name, dcv.CName.Value);
+            {
+                if (dcv.CName != null && !string.IsNullOrEmpty(dcv.CName.Name) && !string.IsNullOrEmpty(dcv.CName.Value))
+                {
+                    cnames.Add(dcv.CName.Name, dcv.CName.Value);
+                }
 
+                if (string.IsNullOrEmpty(dcv.Email))
+                {
+                    cnames.Add(dcv.Email, dcv.Email);
+                }
+            }
+        
         return new EnrollmentResult
         {
             Status = (int)EndEntityStatus.EXTERNALVALIDATION, //success
@@ -149,7 +157,7 @@ public class RequestManager
 
         var bytes = Encoding.UTF8.GetBytes(cert);
         var encodedString = Convert.ToBase64String(bytes);
-        var commonNameValidationEmail = productInfo.ProductParameters["CN DCV Email (admin@yourdomain.com)"];
+        var commonNameValidationEmail = productInfo.ProductParameters["CN DCV Email"];
         var methodType = productInfo.ProductParameters["Domain Control Validation Method"];
         var certificateType = GetCertificateType(productInfo.ProductID);
 
@@ -162,7 +170,7 @@ public class RequestManager
             ApplicantFirstName = productInfo.ProductParameters["Applicant First Name"],
             ApplicantLastName = productInfo.ProductParameters["Applicant Last Name"],
             ApplicantEmailAddress = productInfo.ProductParameters["Applicant Email Address"],
-            ApplicantPhoneNumber = productInfo.ProductParameters["Applicant Phone (+nn.nnnnnnnn)"],
+            ApplicantPhoneNumber = productInfo.ProductParameters["Applicant Phone"],
             DomainControlValidation = GetDomainControlValidation(methodType, commonNameValidationEmail),
             Notifications = GetNotifications(productInfo),
             OrganizationContact = productInfo.ProductParameters["Organization Contact"],
@@ -222,7 +230,7 @@ public class RequestManager
 
         var bytes = Encoding.UTF8.GetBytes(cert);
         var encodedString = Convert.ToBase64String(bytes);
-        var commonNameValidationEmail = productInfo.ProductParameters["CN DCV Email (admin@yourdomain.com)"];
+        var commonNameValidationEmail = productInfo.ProductParameters["CN DCV Email"];
         var methodType = productInfo.ProductParameters["Domain Control Validation Method"];
         var certificateType = GetCertificateType(productInfo.ProductID);
 
@@ -236,7 +244,7 @@ public class RequestManager
             ApplicantFirstName = productInfo.ProductParameters["Applicant First Name"],
             ApplicantLastName = productInfo.ProductParameters["Applicant Last Name"],
             ApplicantEmailAddress = productInfo.ProductParameters["Applicant Email Address"],
-            ApplicantPhoneNumber = productInfo.ProductParameters["Applicant Phone (+nn.nnnnnnnn)"],
+            ApplicantPhoneNumber = productInfo.ProductParameters["Applicant Phone"],
             DomainControlValidation = GetDomainControlValidation(methodType, commonNameValidationEmail),
             Notifications = GetNotifications(productInfo),
             OrganizationContact = productInfo.ProductParameters["Organization Contact"],
@@ -280,7 +288,7 @@ public class RequestManager
 
         var bytes = Encoding.UTF8.GetBytes(cert);
         var encodedString = Convert.ToBase64String(bytes);
-        var commonNameValidationEmail = productInfo.ProductParameters["CN DCV Email (admin@yourdomain.com)"];
+        var commonNameValidationEmail = productInfo.ProductParameters["CN DCV Email"];
         var methodType = productInfo.ProductParameters["Domain Control Validation Method"];
         var certificateType = GetCertificateType(productInfo.ProductID);
 
@@ -294,7 +302,7 @@ public class RequestManager
             ApplicantFirstName = productInfo.ProductParameters["Applicant First Name"],
             ApplicantLastName = productInfo.ProductParameters["Applicant Last Name"],
             ApplicantEmailAddress = productInfo.ProductParameters["Applicant Email Address"],
-            ApplicantPhoneNumber = productInfo.ProductParameters["Applicant Phone (+nn.nnnnnnnn)"],
+            ApplicantPhoneNumber = productInfo.ProductParameters["Applicant Phone"],
             DomainControlValidation = GetDomainControlValidation(methodType, commonNameValidationEmail),
             Notifications = GetNotifications(productInfo),
             OrganizationContact = productInfo.ProductParameters["Organization Contact"],
