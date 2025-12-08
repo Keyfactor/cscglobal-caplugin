@@ -4,12 +4,10 @@
 // Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the specific language governing permissions
 // and limitations under the License.
-using System;
+
 using System.Net;
-using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text;
-using System.Threading.Tasks;
 using Keyfactor.AnyGateway.Extensions;
 using Keyfactor.Extensions.CAPlugin.CSCGlobal.Client.Models;
 using Keyfactor.Extensions.CAPlugin.CSCGlobal.Interfaces;
@@ -24,7 +22,7 @@ public sealed class CscGlobalClient : ICscGlobalClient
     private readonly ILogger Logger;
 
     public CscGlobalClient(IAnyCAPluginConfigProvider config)
-    { 
+    {
         Logger = LogHandler.GetClassLogger<CSCGlobalCAPlugin>();
         if (config.CAConnectionData.ContainsKey(Constants.CscGlobalApiKey))
         {
@@ -88,6 +86,7 @@ public sealed class CscGlobalClient : ICscGlobalClient
                 response.Result = null;
                 return response;
             }
+
             var rawRenewResponse = await resp.Content.ReadAsStringAsync();
             Logger.LogTrace("Logging Success Response Raw");
             Logger.LogTrace(rawRenewResponse);
@@ -134,16 +133,16 @@ public sealed class CscGlobalClient : ICscGlobalClient
         }
     }
 
-	public async Task<List<GetCustomField>> SubmitGetCustomFields()
-	{
-		using (var resp = await RestClient.GetAsync($"/dbs/api/v2/admin/customfields"))
-		{
-			resp.EnsureSuccessStatusCode();
-			var getCustomFieldsResponse =
-				JsonConvert.DeserializeObject<GetCustomFields>(await resp.Content.ReadAsStringAsync());
-			return getCustomFieldsResponse.CustomFields;
-		}
-	}
+    public async Task<List<GetCustomField>> SubmitGetCustomFields()
+    {
+        using (var resp = await RestClient.GetAsync("/dbs/api/v2/admin/customfields"))
+        {
+            resp.EnsureSuccessStatusCode();
+            var getCustomFieldsResponse =
+                JsonConvert.DeserializeObject<GetCustomFields>(await resp.Content.ReadAsStringAsync());
+            return getCustomFieldsResponse.CustomFields;
+        }
+    }
 
     public async Task<RevokeResponse> SubmitRevokeCertificateAsync(string uuId)
     {
