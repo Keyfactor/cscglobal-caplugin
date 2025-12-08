@@ -5,9 +5,9 @@
 <p align="center">
   <!-- Badges -->
 <img src="https://img.shields.io/badge/integration_status-pilot-3D1973?style=flat-square" alt="Integration Status: pilot" />
-<a href="https://github.com/Keyfactor/cscglobal-caplugin-dev/releases"><img src="https://img.shields.io/github/v/release/Keyfactor/cscglobal-caplugin-dev?style=flat-square" alt="Release" /></a>
-<img src="https://img.shields.io/github/issues/Keyfactor/cscglobal-caplugin-dev?style=flat-square" alt="Issues" />
-<img src="https://img.shields.io/github/downloads/Keyfactor/cscglobal-caplugin-dev/total?style=flat-square&label=downloads&color=28B905" alt="GitHub Downloads (all assets, all releases)" />
+<a href="https://github.com/Keyfactor/cscglobal-caplugin/releases"><img src="https://img.shields.io/github/v/release/Keyfactor/cscglobal-caplugin?style=flat-square" alt="Release" /></a>
+<img src="https://img.shields.io/github/issues/Keyfactor/cscglobal-caplugin?style=flat-square" alt="Issues" />
+<img src="https://img.shields.io/github/downloads/Keyfactor/cscglobal-caplugin/total?style=flat-square&label=downloads&color=28B905" alt="GitHub Downloads (all assets, all releases)" />
 </p>
 
 <p align="center">
@@ -53,7 +53,7 @@ This integration is tested and confirmed as working for Anygateway REST 24.2 and
 
 1. Install the AnyCA Gateway REST per the [official Keyfactor documentation](https://software.keyfactor.com/Guides/AnyCAGatewayREST/Content/AnyCAGatewayREST/InstallIntroduction.htm).
 
-2. On the server hosting the AnyCA Gateway REST, download and unzip the latest [CSCGlobal CA  Gateway AnyCA Gateway REST plugin](https://github.com/Keyfactor/cscglobal-caplugin-dev/releases/latest) from GitHub.
+2. On the server hosting the AnyCA Gateway REST, download and unzip the latest [CSCGlobal CA  Gateway AnyCA Gateway REST plugin](https://github.com/Keyfactor/cscglobal-caplugin/releases/latest) from GitHub.
 
 3. Copy the unzipped directory (usually called `net6.0` or `net8.0`) to the Extensions directory:
 
@@ -113,12 +113,12 @@ This integration is tested and confirmed as working for Anygateway REST 24.2 and
     Applicant First Name | String | N/A
     Applicant Last Name | String | N/A
     Applicant Email Address | String | N/A
-    Applicant Phone (+nn.nnnnnnnn) | String | N/A
+    Applicant Phone | String | N/A
     Domain Control Validation Method | Multiple Choice | EMAIL
     Organization Contact | Multiple Choice | Get From CSC Differs For Clients
     Business Unit | Multiple Choice | Get From CSC Differs For Clients
     Notification Email(s) Comma Separated | String | N/A
-    CN DCV Email (admin@yourdomain.com) | String | N/A
+    CN DCV Email | String | N/A
 
     **CSC TrustedSecure EV Certificate - Details Tab**
 
@@ -141,12 +141,12 @@ This integration is tested and confirmed as working for Anygateway REST 24.2 and
     Applicant First Name | String | N/A
     Applicant Last Name | String | N/A
     Applicant Email Address | String | N/A
-    Applicant Phone (+nn.nnnnnnnn) | String | N/A
+    Applicant Phone | String | N/A
     Domain Control Validation Method | Multiple Choice | EMAIL
     Organization Contact | Multiple Choice | Get From CSC Differs For Clients
     Business Unit | Multiple Choice | Get From CSC Differs For Clients
     Notification Email(s) Comma Separated | String | N/A
-    CN DCV Email (admin@yourdomain.com) | String | N/A
+    CN DCV Email | String | N/A
     Organization Country | String | N/A
 
     **CSC TrustedSecure UC Certificate - Details Tab**
@@ -170,12 +170,12 @@ This integration is tested and confirmed as working for Anygateway REST 24.2 and
     Applicant First Name | String | N/A
     Applicant Last Name | String | N/A
     Applicant Email Address | String | N/A
-    Applicant Phone (+nn.nnnnnnnn) | String | N/A
+    Applicant Phone | String | N/A
     Domain Control Validation Method | Multiple Choice | EMAIL
     Organization Contact | Multiple Choice | Get From CSC Differs For Clients
     Business Unit | Multiple Choice | Get From CSC Differs For Clients
     Notification Email(s) Comma Separated | String | N/A
-    CN DCV Email (admin@yourdomain.com) | String | N/A
+    CN DCV Email | String | N/A
     Addtl Sans Comma Separated DCV Emails | String | N/A
     	
 
@@ -200,12 +200,12 @@ This integration is tested and confirmed as working for Anygateway REST 24.2 and
     Applicant First Name | String | N/A
     Applicant Last Name | String | N/A
     Applicant Email Address | String | N/A
-    Applicant Phone (+nn.nnnnnnnn) | String | N/A
+    Applicant Phone | String | N/A
     Domain Control Validation Method | Multiple Choice | EMAIL
     Organization Contact | Multiple Choice | Get From CSC Differs For Clients
     Business Unit | Multiple Choice | Get From CSC Differs For Clients
     Notification Email(s) Comma Separated | String | N/A
-    CN DCV Email (admin@yourdomain.com) | String | N/A
+    CN DCV Email | String | N/A
 
     **CSC TrustedSecure Domain Validated SSL - Details Tab**
 
@@ -228,12 +228,12 @@ This integration is tested and confirmed as working for Anygateway REST 24.2 and
     Applicant First Name | String | N/A
     Applicant Last Name | String | N/A
     Applicant Email Address | String | N/A
-    Applicant Phone (+nn.nnnnnnnn) | String | N/A
+    Applicant Phone | String | N/A
     Domain Control Validation Method | Multiple Choice | EMAIL
     Organization Contact | Multiple Choice | Get From CSC Differs For Clients
     Business Unit | Multiple Choice | Get From CSC Differs For Clients
     Notification Email(s) Comma Separated | String | N/A
-    CN DCV Email (admin@yourdomain.com) | String | N/A
+    CN DCV Email | String | N/A
 
     **CSC TrustedSecure Domain Validated Wildcard SSL - Details Tab**
 
@@ -256,12 +256,12 @@ This integration is tested and confirmed as working for Anygateway REST 24.2 and
     Applicant First Name | String | N/A
     Applicant Last Name | String | N/A
     Applicant Email Address | String | N/A
-    Applicant Phone (+nn.nnnnnnnn) | String | N/A
+    Applicant Phone | String | N/A
     Domain Control Validation Method | Multiple Choice | EMAIL
     Organization Contact | Multiple Choice | Get From CSC Differs For Clients
     Business Unit | Multiple Choice | Get From CSC Differs For Clients
     Notification Email(s) Comma Separated | String | N/A
-    CN DCV Email (admin@yourdomain.com) | String | N/A
+    CN DCV Email | String | N/A
 
     **CSC TrustedSecure Domain Validated UC Certificate - Details Tab**
 
@@ -284,12 +284,12 @@ This integration is tested and confirmed as working for Anygateway REST 24.2 and
     Applicant First Name | String | N/A
     Applicant Last Name | String | N/A
     Applicant Email Address | String | N/A
-    Applicant Phone (+nn.nnnnnnnn) | String | N/A
+    Applicant Phone | String | N/A
     Domain Control Validation Method | Multiple Choice | EMAIL
     Organization Contact | Multiple Choice | Get From CSC Differs For Clients
     Business Unit | Multiple Choice | Get From CSC Differs For Clients
     Notification Email(s) Comma Separated | String | N/A
-    CN DCV Email (admin@yourdomain.com) | String | N/A
+    CN DCV Email | String | N/A
     Addtl Sans Comma Separated DCV Emails | String | N/A
 
 3. Follow the [official Keyfactor documentation](https://software.keyfactor.com/Guides/AnyCAGatewayREST/Content/AnyCAGatewayREST/AddCA-Keyfactor.htm) to add each defined Certificate Authority to Keyfactor Command and import the newly defined Certificate Templates.
