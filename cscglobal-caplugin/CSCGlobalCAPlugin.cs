@@ -221,7 +221,7 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
                     return new EnrollmentResult
                     {
                         Status = 30, //failure
-                        StatusMessage = "You cannot renew and expired cert please perform an new enrollment."
+                        StatusMessage = "You cannot renew an expired cert please perform an new enrollment."
                     };
                 }
 
