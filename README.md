@@ -87,6 +87,7 @@ This integration is tested and confirmed as working for Anygateway REST 24.2 and
         * **BearerToken** - CSCGlobal Bearer Token 
         * **DefaultPageSize** - Default page size for use with the API. Default is 100 
         * **TemplateSync** - Enable template sync. 
+        * **SyncFilterDays** - Number of days from today to filter certificates by expiration date during incremental sync. 
 
 2. PLEASE NOTE, AT THIS TIME THE RAPID_SSL TEMPLATE IS NOT SUPPORTED BY THE CSC API AND WILL NOT WORK WITH THIS INTEGRATION
 

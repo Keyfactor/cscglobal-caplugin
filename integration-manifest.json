@@ -32,6 +32,10 @@
                 {
                     "name": "TemplateSync",
                     "description": "Enable template sync."
+                },
+                {
+                    "name": "SyncFilterDays",
+                    "description": "Number of days from today to filter certificates by expiration date during incremental sync."
                 }
             ],
             "enrollment_config": [
