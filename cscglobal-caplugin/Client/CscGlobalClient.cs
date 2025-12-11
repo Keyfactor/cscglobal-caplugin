@@ -172,7 +172,7 @@ public sealed class CscGlobalClient : ICscGlobalClient
         var filterQuery = "filter=status=in=(ACTIVE,REVOKED)";
         if (!string.IsNullOrEmpty(dateFilter))
         {
-            filterQuery += $";expirationDate=ge={dateFilter}";
+            filterQuery += $";effectiveDate=ge={dateFilter}";
         }
         Logger.LogTrace($"Certificate list filter query: {filterQuery}");
         var resp = RestClient.GetAsync($"/dbs/api/v2/tls/certificate?{filterQuery}").Result;

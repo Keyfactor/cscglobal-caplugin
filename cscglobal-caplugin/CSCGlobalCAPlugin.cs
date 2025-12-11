@@ -116,7 +116,7 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
             else
             {
                 var filterDays = SyncFilterDays > 0 ? SyncFilterDays : 5;
-                var filterDate = DateTime.Today.AddDays(filterDays);
+                var filterDate = DateTime.Today.Subtract(TimeSpan.FromDays(filterDays));
                 var dateFilter = filterDate.ToString("yyyy/MM/dd");
                 Logger.LogDebug($"Performing incremental sync with expiration date filter: {dateFilter}");
                 await SyncCertificates(blockingBuffer, cancelToken, dateFilter);
