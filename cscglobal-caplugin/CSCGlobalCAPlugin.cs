@@ -37,6 +37,8 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
 
     public bool EnableTemplateSync { get; set; }
 
+    public int SyncFilterDays { get; set; }
+
     //done
     public void Initialize(IAnyCAPluginConfigProvider configProvider, ICertificateDataReader certificateDataReader)
     {
@@ -45,6 +47,16 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
         CscGlobalClient = new CscGlobalClient(configProvider);
         var templateSync = configProvider.CAConnectionData["TemplateSync"].ToString();
         if (templateSync.ToUpper() == "ON") EnableTemplateSync = true;
+
+        if (configProvider.CAConnectionData.ContainsKey(Constants.SyncFilterDays))
+        {
+            var syncFilterDaysStr = configProvider.CAConnectionData[Constants.SyncFilterDays]?.ToString();
+            if (int.TryParse(syncFilterDaysStr, out var syncFilterDays))
+            {
+                SyncFilterDays = syncFilterDays;
+                Logger.LogDebug($"SyncFilterDays configured to {SyncFilterDays} days");
+            }
+        }
         Logger.MethodExit(LogLevel.Debug);
     }
 
@@ -98,49 +110,19 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
         {
             if (fullSync)
             {
-                var certs = await CscGlobalClient.SubmitCertificateListRequestAsync();
-
-                foreach (var currentResponseItem in certs.Results)
-                {
-                    cancelToken.ThrowIfCancellationRequested();
-                    Logger.LogTrace($"Took Certificate ID {currentResponseItem?.Uuid} from Queue");
-                    var certStatus = _requestManager.MapReturnStatus(currentResponseItem?.Status);
-
-                    //Keyfactor sync only seems to work when there is a valid cert and I can only get Active valid certs from Csc Global
-                    if (certStatus == Convert.ToInt32(EndEntityStatus.GENERATED) ||
-                        certStatus == Convert.ToInt32(EndEntityStatus.REVOKED))
-                    {
-                        //One click renewal/reissue won't work for this implementation so there is an option to disable it by not syncing back template
-                        var productId = "CscGlobal";
-                        if (EnableTemplateSync) productId = currentResponseItem?.CertificateType;
-
-                        var fileContent =
-                            PreparePemTextFromApi(
-                                currentResponseItem?.Certificate ?? string.Empty);
-
-                        if (fileContent.Length > 0)
-                        {
-                            Logger.LogTrace($"File Content {fileContent}");
-                            var certData = fileContent.Replace("\r\n", string.Empty);
-                            var certString = GetEndEntityCertificate(certData);
-                            //var currentCert = new X509Certificate2(Encoding.ASCII.GetBytes(certString));
-                            if (certString.Length > 0)
-                                blockingBuffer.Add(new AnyCAPluginCertificate
-                                {
-                                    CARequestID = $"{currentResponseItem?.Uuid}",
-                                    Certificate = certString,
-                                    //SubmissionDate = currentResponseItem?.OrderDate == null
-                                    //? Convert.ToDateTime(currentCert.NotBefore)
-                                    //: Convert.ToDateTime(currentResponseItem.OrderDate),
-                                    Status = certStatus,
-                                    ProductID = productId
-                                }, cancelToken);
-                        }
-                    }
-                }
-
-                blockingBuffer.CompleteAdding();
+                Logger.LogDebug("Performing full sync - no date filter applied");
+                await SyncCertificates(blockingBuffer, cancelToken, null);
             }
+            else
+            {
+                var filterDays = SyncFilterDays > 0 ? SyncFilterDays : 5;
+                var filterDate = DateTime.Today.AddDays(filterDays);
+                var dateFilter = filterDate.ToString("yyyy/MM/dd");
+                Logger.LogDebug($"Performing incremental sync with expiration date filter: {dateFilter}");
+                await SyncCertificates(blockingBuffer, cancelToken, dateFilter);
+            }
+
+            blockingBuffer.CompleteAdding();
         }
         catch (Exception e)
         {
@@ -151,6 +133,47 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
         }
 
         Logger.MethodExit(LogLevel.Debug);
+    }
+
+    private async Task SyncCertificates(BlockingCollection<AnyCAPluginCertificate> blockingBuffer,
+        CancellationToken cancelToken, string? dateFilter)
+    {
+        var certs = await CscGlobalClient.SubmitCertificateListRequestAsync(dateFilter);
+
+        foreach (var currentResponseItem in certs.Results)
+        {
+            cancelToken.ThrowIfCancellationRequested();
+            Logger.LogTrace($"Took Certificate ID {currentResponseItem?.Uuid} from Queue");
+            var certStatus = _requestManager.MapReturnStatus(currentResponseItem?.Status);
+
+            //Keyfactor sync only seems to work when there is a valid cert and I can only get Active valid certs from Csc Global
+            if (certStatus == Convert.ToInt32(EndEntityStatus.GENERATED) ||
+                certStatus == Convert.ToInt32(EndEntityStatus.REVOKED))
+            {
+                //One click renewal/reissue won't work for this implementation so there is an option to disable it by not syncing back template
+                var productId = "CscGlobal";
+                if (EnableTemplateSync) productId = currentResponseItem?.CertificateType;
+
+                var fileContent =
+                    PreparePemTextFromApi(
+                        currentResponseItem?.Certificate ?? string.Empty);
+
+                if (fileContent.Length > 0)
+                {
+                    Logger.LogTrace($"File Content {fileContent}");
+                    var certData = fileContent.Replace("\r\n", string.Empty);
+                    var certString = GetEndEntityCertificate(certData);
+                    if (certString.Length > 0)
+                        blockingBuffer.Add(new AnyCAPluginCertificate
+                        {
+                            CARequestID = $"{currentResponseItem?.Uuid}",
+                            Certificate = certString,
+                            Status = certStatus,
+                            ProductID = productId
+                        }, cancelToken);
+                }
+            }
+        }
     }
 
     //done
@@ -371,6 +394,13 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
                 Hidden = false,
                 DefaultValue = "false",
                 Type = "Bool"
+            },
+            [Constants.SyncFilterDays] = new()
+            {
+                Comments = "Number of days from today to filter certificates by expiration date during incremental sync.",
+                Hidden = false,
+                DefaultValue = "5",
+                Type = "Number"
             }
         };
     }

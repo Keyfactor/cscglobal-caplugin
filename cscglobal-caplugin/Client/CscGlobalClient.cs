@@ -166,10 +166,16 @@ public sealed class CscGlobalClient : ICscGlobalClient
         }
     }
 
-    public async Task<CertificateListResponse> SubmitCertificateListRequestAsync()
+    public async Task<CertificateListResponse> SubmitCertificateListRequestAsync(string? dateFilter = null)
     {
         Logger.MethodEntry(LogLevel.Debug);
-        var resp = RestClient.GetAsync("/dbs/api/v2/tls/certificate?filter=status=in=(ACTIVE,REVOKED)").Result;
+        var filterQuery = "filter=status=in=(ACTIVE,REVOKED)";
+        if (!string.IsNullOrEmpty(dateFilter))
+        {
+            filterQuery += $";expirationDate=ge={dateFilter}";
+        }
+        Logger.LogTrace($"Certificate list filter query: {filterQuery}");
+        var resp = RestClient.GetAsync($"/dbs/api/v2/tls/certificate?{filterQuery}").Result;
 
         if (!resp.IsSuccessStatusCode)
         {

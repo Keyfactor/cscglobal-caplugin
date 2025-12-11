@@ -24,7 +24,7 @@ public interface ICscGlobalClient
 
     Task<List<GetCustomField>> SubmitGetCustomFields();
 
-    Task<CertificateListResponse> SubmitCertificateListRequestAsync();
+    Task<CertificateListResponse> SubmitCertificateListRequestAsync(string? dateFilter = null);
 
     Task<RevokeResponse> SubmitRevokeCertificateAsync(string uuId);
 }
