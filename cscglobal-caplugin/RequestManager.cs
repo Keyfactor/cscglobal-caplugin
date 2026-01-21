@@ -4,15 +4,13 @@
 // Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the specific language governing permissions
 // and limitations under the License.
+
 using System.Net.Mail;
 using System.Text;
 using Keyfactor.AnyGateway.Extensions;
 using Keyfactor.Extensions.CAPlugin.CSCGlobal.Client.Models;
 using Keyfactor.Extensions.CAPlugin.CSCGlobal.Interfaces;
-using Keyfactor.PKI;
 using Keyfactor.PKI.Enums.EJBCA;
-
-using Org.BouncyCastle.Bcpg;
 
 namespace Keyfactor.Extensions.CAPlugin.CSCGlobal;
 
@@ -24,22 +22,22 @@ public class RequestManager
     private List<CustomField> GetCustomFields(EnrollmentProductInfo productInfo, List<GetCustomField> customFields)
     {
         var customFieldList = new List<CustomField>();
-		foreach (var field in customFields)
-		{
-			if (productInfo.ProductParameters.ContainsKey(field.Label))
-			{
-				var newField = new CustomField
-				{
-					Name = field.Label,
-					Value = productInfo.ProductParameters[field.Label]
-				};
-				customFieldList.Add(newField);
-			}
-			else if (field.Mandatory)
-			{
-				throw new Exception($"Custom field {field.Label} is marked as mandatory, but was not supplied in the request.");
-			}
-		}
+        foreach (var field in customFields)
+            if (productInfo.ProductParameters.ContainsKey(field.Label))
+            {
+                var newField = new CustomField
+                {
+                    Name = field.Label,
+                    Value = productInfo.ProductParameters[field.Label]
+                };
+                customFieldList.Add(newField);
+            }
+            else if (field.Mandatory)
+            {
+                throw new Exception(
+                    $"Custom field {field.Label} is marked as mandatory, but was not supplied in the request.");
+            }
+
         return customFieldList;
     }
 
@@ -73,22 +71,28 @@ public class RequestManager
                 StatusMessage = registrationResponse.RegistrationError.Description
             };
 
-		Dictionary<string, string> cnames = new Dictionary<string, string>();
-		if (registrationResponse.Result.DcvDetails != null && registrationResponse.Result.DcvDetails.Count > 0)
-		{
-			foreach (var dcv in registrationResponse.Result.DcvDetails)
-			{
-				cnames.Add(dcv.CName.Name, dcv.CName.Value);
-			}
-		}
+        var cnames = new Dictionary<string, string>();
+        if (registrationResponse.Result.DcvDetails != null && registrationResponse.Result.DcvDetails.Count > 0)
+            foreach (var dcv in registrationResponse.Result.DcvDetails)
+            {
+                if (dcv.CName != null && !string.IsNullOrEmpty(dcv.CName.Name) && !string.IsNullOrEmpty(dcv.CName.Value))
+                {
+                    cnames.Add(dcv.CName.Name, dcv.CName.Value);
+                }
 
-		return new EnrollmentResult
+                if (string.IsNullOrEmpty(dcv.Email))
+                {
+                    cnames.Add(dcv.Email, dcv.Email);
+                }
+            }
+        
+        return new EnrollmentResult
         {
             Status = (int)EndEntityStatus.EXTERNALVALIDATION, //success
             CARequestID = registrationResponse.Result.Status.Uuid,
             StatusMessage =
                 $"Order Successfully Created With Order Number {registrationResponse.Result.CommonName}",
-			EnrollmentContext = (cnames.Count > 0) ? cnames : null
+            EnrollmentContext = cnames.Count > 0 ? cnames : null
         };
     }
 
@@ -153,7 +157,7 @@ public class RequestManager
 
         var bytes = Encoding.UTF8.GetBytes(cert);
         var encodedString = Convert.ToBase64String(bytes);
-        var commonNameValidationEmail = productInfo.ProductParameters["CN DCV Email (admin@yourdomain.com)"];
+        var commonNameValidationEmail = productInfo.ProductParameters["CN DCV Email"];
         var methodType = productInfo.ProductParameters["Domain Control Validation Method"];
         var certificateType = GetCertificateType(productInfo.ProductID);
 
@@ -166,7 +170,7 @@ public class RequestManager
             ApplicantFirstName = productInfo.ProductParameters["Applicant First Name"],
             ApplicantLastName = productInfo.ProductParameters["Applicant Last Name"],
             ApplicantEmailAddress = productInfo.ProductParameters["Applicant Email Address"],
-            ApplicantPhoneNumber = productInfo.ProductParameters["Applicant Phone (+nn.nnnnnnnn)"],
+            ApplicantPhoneNumber = productInfo.ProductParameters["Applicant Phone"],
             DomainControlValidation = GetDomainControlValidation(methodType, commonNameValidationEmail),
             Notifications = GetNotifications(productInfo),
             OrganizationContact = productInfo.ProductParameters["Organization Contact"],
@@ -226,7 +230,7 @@ public class RequestManager
 
         var bytes = Encoding.UTF8.GetBytes(cert);
         var encodedString = Convert.ToBase64String(bytes);
-        var commonNameValidationEmail = productInfo.ProductParameters["CN DCV Email (admin@yourdomain.com)"];
+        var commonNameValidationEmail = productInfo.ProductParameters["CN DCV Email"];
         var methodType = productInfo.ProductParameters["Domain Control Validation Method"];
         var certificateType = GetCertificateType(productInfo.ProductID);
 
@@ -240,7 +244,7 @@ public class RequestManager
             ApplicantFirstName = productInfo.ProductParameters["Applicant First Name"],
             ApplicantLastName = productInfo.ProductParameters["Applicant Last Name"],
             ApplicantEmailAddress = productInfo.ProductParameters["Applicant Email Address"],
-            ApplicantPhoneNumber = productInfo.ProductParameters["Applicant Phone (+nn.nnnnnnnn)"],
+            ApplicantPhoneNumber = productInfo.ProductParameters["Applicant Phone"],
             DomainControlValidation = GetDomainControlValidation(methodType, commonNameValidationEmail),
             Notifications = GetNotifications(productInfo),
             OrganizationContact = productInfo.ProductParameters["Organization Contact"],
@@ -284,7 +288,7 @@ public class RequestManager
 
         var bytes = Encoding.UTF8.GetBytes(cert);
         var encodedString = Convert.ToBase64String(bytes);
-        var commonNameValidationEmail = productInfo.ProductParameters["CN DCV Email (admin@yourdomain.com)"];
+        var commonNameValidationEmail = productInfo.ProductParameters["CN DCV Email"];
         var methodType = productInfo.ProductParameters["Domain Control Validation Method"];
         var certificateType = GetCertificateType(productInfo.ProductID);
 
@@ -298,7 +302,7 @@ public class RequestManager
             ApplicantFirstName = productInfo.ProductParameters["Applicant First Name"],
             ApplicantLastName = productInfo.ProductParameters["Applicant Last Name"],
             ApplicantEmailAddress = productInfo.ProductParameters["Applicant Email Address"],
-            ApplicantPhoneNumber = productInfo.ProductParameters["Applicant Phone (+nn.nnnnnnnn)"],
+            ApplicantPhoneNumber = productInfo.ProductParameters["Applicant Phone"],
             DomainControlValidation = GetDomainControlValidation(methodType, commonNameValidationEmail),
             Notifications = GetNotifications(productInfo),
             OrganizationContact = productInfo.ProductParameters["Organization Contact"],
