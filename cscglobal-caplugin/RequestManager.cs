@@ -4,12 +4,12 @@
 // Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the specific language governing permissions
 // and limitations under the License.
+
 using System.Net.Mail;
 using System.Text;
 using Keyfactor.AnyGateway.Extensions;
 using Keyfactor.Extensions.CAPlugin.CSCGlobal.Client.Models;
 using Keyfactor.Extensions.CAPlugin.CSCGlobal.Interfaces;
-using Keyfactor.PKI;
 using Keyfactor.PKI.Enums.EJBCA;
 
 namespace Keyfactor.Extensions.CAPlugin.CSCGlobal;
@@ -19,9 +19,25 @@ public class RequestManager
     public static Func<string, string> Pemify = ss =>
         ss.Length <= 64 ? ss : ss.Substring(0, 64) + "\n" + Pemify(ss.Substring(64));
 
-    private List<CustomField> GetCustomFields(EnrollmentProductInfo productInfo)
+    private List<CustomField> GetCustomFields(EnrollmentProductInfo productInfo, List<GetCustomField> customFields)
     {
         var customFieldList = new List<CustomField>();
+        foreach (var field in customFields)
+            if (productInfo.ProductParameters.ContainsKey(field.Label))
+            {
+                var newField = new CustomField
+                {
+                    Name = field.Label,
+                    Value = productInfo.ProductParameters[field.Label]
+                };
+                customFieldList.Add(newField);
+            }
+            else if (field.Mandatory)
+            {
+                throw new Exception(
+                    $"Custom field {field.Label} is marked as mandatory, but was not supplied in the request.");
+            }
+
         return customFieldList;
     }
 
@@ -55,12 +71,28 @@ public class RequestManager
                 StatusMessage = registrationResponse.RegistrationError.Description
             };
 
+        var cnames = new Dictionary<string, string>();
+        if (registrationResponse.Result.DcvDetails != null && registrationResponse.Result.DcvDetails.Count > 0)
+            foreach (var dcv in registrationResponse.Result.DcvDetails)
+            {
+                if (dcv.CName != null && !string.IsNullOrEmpty(dcv.CName.Name) && !string.IsNullOrEmpty(dcv.CName.Value))
+                {
+                    cnames.Add(dcv.CName.Name, dcv.CName.Value);
+                }
+
+                if (string.IsNullOrEmpty(dcv.Email))
+                {
+                    cnames.Add(dcv.Email, dcv.Email);
+                }
+            }
+        
         return new EnrollmentResult
         {
             Status = (int)EndEntityStatus.EXTERNALVALIDATION, //success
             CARequestID = registrationResponse.Result.Status.Uuid,
             StatusMessage =
-                $"Order Successfully Created With Order Number {registrationResponse.Result.CommonName}"
+                $"Order Successfully Created With Order Number {registrationResponse.Result.CommonName}",
+            EnrollmentContext = cnames.Count > 0 ? cnames : null
         };
     }
 
@@ -116,7 +148,7 @@ public class RequestManager
     }
 
     public RegistrationRequest GetRegistrationRequest(EnrollmentProductInfo productInfo, string csr,
-        Dictionary<string, string[]> sans)
+        Dictionary<string, string[]> sans, List<GetCustomField> customFields)
     {
         //var cert = "-----BEGIN CERTIFICATE REQUEST-----\r\n";
         var cert = Pemify(csr);
@@ -125,7 +157,7 @@ public class RequestManager
 
         var bytes = Encoding.UTF8.GetBytes(cert);
         var encodedString = Convert.ToBase64String(bytes);
-        var commonNameValidationEmail = productInfo.ProductParameters["CN DCV Email (admin@yourdomain.com)"];
+        var commonNameValidationEmail = productInfo.ProductParameters["CN DCV Email"];
         var methodType = productInfo.ProductParameters["Domain Control Validation Method"];
         var certificateType = GetCertificateType(productInfo.ProductID);
 
@@ -138,13 +170,13 @@ public class RequestManager
             ApplicantFirstName = productInfo.ProductParameters["Applicant First Name"],
             ApplicantLastName = productInfo.ProductParameters["Applicant Last Name"],
             ApplicantEmailAddress = productInfo.ProductParameters["Applicant Email Address"],
-            ApplicantPhoneNumber = productInfo.ProductParameters["Applicant Phone (+nn.nnnnnnnn)"],
+            ApplicantPhoneNumber = productInfo.ProductParameters["Applicant Phone"],
             DomainControlValidation = GetDomainControlValidation(methodType, commonNameValidationEmail),
             Notifications = GetNotifications(productInfo),
             OrganizationContact = productInfo.ProductParameters["Organization Contact"],
             BusinessUnit = productInfo.ProductParameters["Business Unit"],
             ShowPrice = true, //User should not have to fill this out
-            CustomFields = GetCustomFields(productInfo),
+            CustomFields = GetCustomFields(productInfo, customFields),
             SubjectAlternativeNames = certificateType == "2" ? GetSubjectAlternativeNames(productInfo, sans) : null,
             EvCertificateDetails = certificateType == "3" ? GetEvCertificateDetails(productInfo) : null
         };
@@ -190,7 +222,7 @@ public class RequestManager
     }
 
     public RenewalRequest GetRenewalRequest(EnrollmentProductInfo productInfo, string uUId, string csr,
-        Dictionary<string, string[]> sans)
+        Dictionary<string, string[]> sans, List<GetCustomField> customFields)
     {
         //var cert = "-----BEGIN CERTIFICATE REQUEST-----\r\n";
         var cert = Pemify(csr);
@@ -198,7 +230,7 @@ public class RequestManager
 
         var bytes = Encoding.UTF8.GetBytes(cert);
         var encodedString = Convert.ToBase64String(bytes);
-        var commonNameValidationEmail = productInfo.ProductParameters["CN DCV Email (admin@yourdomain.com)"];
+        var commonNameValidationEmail = productInfo.ProductParameters["CN DCV Email"];
         var methodType = productInfo.ProductParameters["Domain Control Validation Method"];
         var certificateType = GetCertificateType(productInfo.ProductID);
 
@@ -212,14 +244,14 @@ public class RequestManager
             ApplicantFirstName = productInfo.ProductParameters["Applicant First Name"],
             ApplicantLastName = productInfo.ProductParameters["Applicant Last Name"],
             ApplicantEmailAddress = productInfo.ProductParameters["Applicant Email Address"],
-            ApplicantPhoneNumber = productInfo.ProductParameters["Applicant Phone (+nn.nnnnnnnn)"],
+            ApplicantPhoneNumber = productInfo.ProductParameters["Applicant Phone"],
             DomainControlValidation = GetDomainControlValidation(methodType, commonNameValidationEmail),
             Notifications = GetNotifications(productInfo),
             OrganizationContact = productInfo.ProductParameters["Organization Contact"],
             BusinessUnit = productInfo.ProductParameters["Business Unit"],
             ShowPrice = true,
             SubjectAlternativeNames = certificateType == "2" ? GetSubjectAlternativeNames(productInfo, sans) : null,
-            CustomFields = GetCustomFields(productInfo),
+            CustomFields = GetCustomFields(productInfo, customFields),
             EvCertificateDetails = certificateType == "3" ? GetEvCertificateDetails(productInfo) : null
         };
     }
@@ -248,7 +280,7 @@ public class RequestManager
     }
 
     public ReissueRequest GetReissueRequest(EnrollmentProductInfo productInfo, string uUId, string csr,
-        Dictionary<string, string[]> sans)
+        Dictionary<string, string[]> sans, List<GetCustomField> customFields)
     {
         //var cert = "-----BEGIN CERTIFICATE REQUEST-----\r\n";
         var cert = Pemify(csr);
@@ -256,7 +288,7 @@ public class RequestManager
 
         var bytes = Encoding.UTF8.GetBytes(cert);
         var encodedString = Convert.ToBase64String(bytes);
-        var commonNameValidationEmail = productInfo.ProductParameters["CN DCV Email (admin@yourdomain.com)"];
+        var commonNameValidationEmail = productInfo.ProductParameters["CN DCV Email"];
         var methodType = productInfo.ProductParameters["Domain Control Validation Method"];
         var certificateType = GetCertificateType(productInfo.ProductID);
 
@@ -270,14 +302,14 @@ public class RequestManager
             ApplicantFirstName = productInfo.ProductParameters["Applicant First Name"],
             ApplicantLastName = productInfo.ProductParameters["Applicant Last Name"],
             ApplicantEmailAddress = productInfo.ProductParameters["Applicant Email Address"],
-            ApplicantPhoneNumber = productInfo.ProductParameters["Applicant Phone (+nn.nnnnnnnn)"],
+            ApplicantPhoneNumber = productInfo.ProductParameters["Applicant Phone"],
             DomainControlValidation = GetDomainControlValidation(methodType, commonNameValidationEmail),
             Notifications = GetNotifications(productInfo),
             OrganizationContact = productInfo.ProductParameters["Organization Contact"],
             BusinessUnit = productInfo.ProductParameters["Business Unit"],
             ShowPrice = true,
             SubjectAlternativeNames = certificateType == "2" ? GetSubjectAlternativeNames(productInfo, sans) : null,
-            CustomFields = GetCustomFields(productInfo),
+            CustomFields = GetCustomFields(productInfo, customFields),
             EvCertificateDetails = certificateType == "3" ? GetEvCertificateDetails(productInfo) : null
         };
     }

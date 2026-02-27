@@ -5,10 +5,18 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the specific language governing permissions
 // and limitations under the License.
 
-namespace Keyfactor.Extensions.CAPlugin.CSCGlobal.Interfaces;
+using Keyfactor.Extensions.CAPlugin.CSCGlobal.Interfaces;
+using Newtonsoft.Json;
 
-public interface ICustomField
+namespace Keyfactor.Extensions.CAPlugin.CSCGlobal.Client.Models;
+
+public class GetCustomField : IGetCustomField
 {
-    string Name { get; set; }
-    string Value { get; set; }
+    [JsonProperty("label")] public string Label { get; set; }
+    [JsonProperty("mandatory")] public bool Mandatory { get; set; }
+}
+
+public class GetCustomFields
+{
+    [JsonProperty("customFields")] public List<GetCustomField> CustomFields { get; set; }
 }

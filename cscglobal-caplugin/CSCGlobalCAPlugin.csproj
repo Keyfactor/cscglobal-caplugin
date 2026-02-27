@@ -12,27 +12,28 @@
 	</PropertyGroup>
 
 
-  <ItemGroup>
-    <PackageReference Include="BouncyCastle.Cryptography" Version="2.5.0" />
-    <PackageReference Include="Keyfactor.AnyGateway.IAnyCAPlugin" Version="3.0.0" />
-    <PackageReference Include="Keyfactor.Common" Version="2.5.0" />
-    <PackageReference Include="Keyfactor.Logging" Version="1.1.2" />
-    <PackageReference Include="Keyfactor.Orchestrators.Common" Version="3.2.0" />
-    <PackageReference Include="Keyfactor.PKI" Version="5.5.0" />
-    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
-    <PackageReference Include="System.Formats.Asn1" Version="8.0.1" />
-    <PackageReference Include="System.Net.Http" Version="4.3.4" />
-  </ItemGroup>
-
-
 	<Target Name="CustomPostBuild" AfterTargets="PostBuildEvent">
 		<Exec Condition="'$(Configuration)'=='DebugAndPush'" Command="PowerShell -ExecutionPolicy Bypass -File &quot;C:\Users\mkachkaev\source\repos\scripts\SyncScriptCSC.ps1&quot;&#xA;" />
 	</Target>
 
-  <ItemGroup>
-    <None Update="manifest.json">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-    </None>
-  </ItemGroup>
+
+	<ItemGroup Condition="'$(TargetFramework)' == 'net8.0'">
+		<PackageReference Include="Keyfactor.AnyGateway.IAnyCAPlugin" Version="3.1.0" />
+		<PackageReference Include="Keyfactor.PKI" Version="8.1.1" />
+		<PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
+	</ItemGroup>
+
+	<ItemGroup Condition="'$(TargetFramework)' == 'net6.0'">
+		<PackageReference Include="Keyfactor.AnyGateway.IAnyCAPlugin" Version="3.1.0" />
+		<PackageReference Include="Keyfactor.PKI" Version="6.3.0" />
+		<PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
+	</ItemGroup>
+
+
+	<ItemGroup>
+		<None Update="manifest.json">
+			<CopyToOutputDirectory>Always</CopyToOutputDirectory>
+		</None>
+	</ItemGroup>
 
 </Project>
