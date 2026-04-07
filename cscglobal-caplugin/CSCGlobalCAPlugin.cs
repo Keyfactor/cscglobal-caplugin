@@ -39,6 +39,8 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
 
     public int SyncFilterDays { get; set; }
 
+    public int RenewalWindowDays { get; set; }
+
     //done
     public void Initialize(IAnyCAPluginConfigProvider configProvider, ICertificateDataReader certificateDataReader)
     {
@@ -57,6 +59,15 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
                 Logger.LogDebug($"SyncFilterDays configured to {SyncFilterDays} days");
             }
         }
+
+        RenewalWindowDays = 30; // default
+        if (configProvider.CAConnectionData.TryGetValue(Constants.RenewalWindowDays, out var renewalWindowObj))
+        {
+            if (int.TryParse(renewalWindowObj?.ToString(), out var renewalWindowDays) && renewalWindowDays > 0)
+                RenewalWindowDays = renewalWindowDays;
+        }
+        Logger.LogDebug("RenewalWindowDays configured to {Days} days", RenewalWindowDays);
+
         Logger.MethodExit(LogLevel.Debug);
     }
 
@@ -252,17 +263,44 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
                 return _requestManager.GetEnrollmentResult(enrollmentResponse);
             case EnrollmentType.RenewOrReissue:
                 Logger.LogTrace("Entering Renew Enrollment");
-                //Logic to determine renew vs reissue
-                var renewal = false;
                 var order_id = await _certificateDataReader.GetRequestIDBySerialNumber(priorSn);
-                var expirationDate = _certificateDataReader.GetExpirationDateByRequestId(order_id);
-                if (expirationDate == null)
+
+                // Determine renew vs reissue based on order expiry window.
+                // Fetch the live cert record from CSC to get the orderDate, then compute
+                // orderExpiry = orderDate + 1 year (annual subscription assumption).
+                // If today falls within RenewalWindowDays of orderExpiry → Renewal (new paid order).
+                // Otherwise → Reissue (free reissue under the same active order).
+                var renewal = false;
+                try
                 {
-                    var localcert = await GetSingleRecord(order_id);
-                    expirationDate = localcert.RevocationDate;
+                    var liveCert = await CscGlobalClient.SubmitGetCertificateAsync(order_id[..36]);
+                    if (liveCert != null && DateTime.TryParse(liveCert.OrderDate, out var orderDate))
+                    {
+                        var orderExpiry = orderDate.AddYears(1);
+                        var daysUntilOrderExpiry = (orderExpiry - DateTime.UtcNow).TotalDays;
+                        renewal = daysUntilOrderExpiry <= RenewalWindowDays;
+                        Logger.LogDebug(
+                            "RenewOrReissue: orderDate={OrderDate}, orderExpiry={OrderExpiry}, daysRemaining={Days}, renewalWindow={Window}, isRenewal={IsRenewal}",
+                            liveCert.OrderDate, orderExpiry.ToString("dd-MMM-yyyy"),
+                            (int)daysUntilOrderExpiry, RenewalWindowDays, renewal);
+                    }
+                    else
+                    {
+                        // Fallback: if we can't parse orderDate, use cert expiration as before
+                        var expirationDate = _certificateDataReader.GetExpirationDateByRequestId(order_id)
+                            ?? (await GetSingleRecord(order_id)).RevocationDate;
+                        renewal = expirationDate < DateTime.Now;
+                        Logger.LogDebug("RenewOrReissue: falling back to cert expiry check, isRenewal={IsRenewal}", renewal);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogWarning("RenewOrReissue: failed to fetch live cert for order decision, falling back to cert expiry. Error: {Error}", ex.Message);
+                    var expirationDate = _certificateDataReader.GetExpirationDateByRequestId(order_id)
+                        ?? (await GetSingleRecord(order_id)).RevocationDate;
+                    renewal = expirationDate < DateTime.Now;
                 }
 
-                if (expirationDate < DateTime.Now) renewal = true;
                 if (renewal)
                 {
                     //One click won't work for this implementation b/c we are missing enrollment params
@@ -400,6 +438,13 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
                 Comments = "Number of days from today to filter certificates by expiration date during incremental sync.",
                 Hidden = false,
                 DefaultValue = "5",
+                Type = "Number"
+            },
+            [Constants.RenewalWindowDays] = new()
+            {
+                Comments = "Number of days before the annual order expiry within which a RenewOrReissue triggers a paid Renewal rather than a free Reissue. Default is 30.",
+                Hidden = false,
+                DefaultValue = "30",
                 Type = "Number"
             }
         };
