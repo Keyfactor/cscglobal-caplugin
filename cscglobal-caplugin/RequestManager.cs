@@ -380,33 +380,78 @@ public class RequestManager
         };
     }
 
+    // Maps Keyfactor product ID -> CSC API certificate type code (used for enrollment requests)
+    private static readonly Dictionary<string, string> ProductIdToCodeMap = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["CSC TrustedSecure Premium Certificate"] = "0",
+        ["CSC TrustedSecure Premium Wildcard Certificate"] = "1",
+        ["CSC TrustedSecure UC Certificate"] = "2",
+        ["CSC TrustedSecure EV Certificate"] = "3",
+        ["CSC TrustedSecure Domain Validated SSL"] = "4",
+        ["CSC Trusted Secure Domain Validated SSL"] = "4",
+        ["CSC TrustedSecure Domain Validated Wildcard SSL"] = "5",
+        ["CSC Trusted Secure Domain Validated Wildcard SSL"] = "5",
+        ["CSC TrustedSecure Domain Validated UC Certificate"] = "6",
+        ["CSC Trusted Secure Domain Validated UC Certificate"] = "6",
+    };
+
+    // Reverse map: CSC API certificate type string -> Keyfactor product ID (used during sync)
+    // CSC may return numeric codes ("0","1") or descriptive strings ("Premium","EV","UC", etc.)
+    private static readonly Dictionary<string, string> CodeToProductIdMap = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["0"] = "CSC TrustedSecure Premium Certificate",
+        ["Premium"] = "CSC TrustedSecure Premium Certificate",
+        ["CSC TrustedSecure Premium Certificate"] = "CSC TrustedSecure Premium Certificate",
+        ["1"] = "CSC TrustedSecure Premium Wildcard Certificate",
+        ["Wildcard"] = "CSC TrustedSecure Premium Wildcard Certificate",
+        ["Premium Wildcard"] = "CSC TrustedSecure Premium Wildcard Certificate",
+        ["CSC TrustedSecure Premium Wildcard Certificate"] = "CSC TrustedSecure Premium Wildcard Certificate",
+        ["2"] = "CSC TrustedSecure UC Certificate",
+        ["UC"] = "CSC TrustedSecure UC Certificate",
+        ["CSC TrustedSecure UC Certificate"] = "CSC TrustedSecure UC Certificate",
+        ["3"] = "CSC TrustedSecure EV Certificate",
+        ["EV"] = "CSC TrustedSecure EV Certificate",
+        ["CSC TrustedSecure EV Certificate"] = "CSC TrustedSecure EV Certificate",
+        ["4"] = "CSC TrustedSecure Domain Validated SSL",
+        ["DV"] = "CSC TrustedSecure Domain Validated SSL",
+        ["Domain Validated SSL"] = "CSC TrustedSecure Domain Validated SSL",
+        ["CSC TrustedSecure Domain Validated SSL"] = "CSC TrustedSecure Domain Validated SSL",
+        ["5"] = "CSC TrustedSecure Domain Validated Wildcard SSL",
+        ["DV Wildcard"] = "CSC TrustedSecure Domain Validated Wildcard SSL",
+        ["Domain Validated Wildcard SSL"] = "CSC TrustedSecure Domain Validated Wildcard SSL",
+        ["CSC TrustedSecure Domain Validated Wildcard SSL"] = "CSC TrustedSecure Domain Validated Wildcard SSL",
+        ["6"] = "CSC TrustedSecure Domain Validated UC Certificate",
+        ["DV UC"] = "CSC TrustedSecure Domain Validated UC Certificate",
+        ["Domain Validated UC Certificate"] = "CSC TrustedSecure Domain Validated UC Certificate",
+        ["CSC TrustedSecure Domain Validated UC Certificate"] = "CSC TrustedSecure Domain Validated UC Certificate",
+    };
+
     private string GetCertificateType(string productId)
     {
-        switch (productId)
+        Logger.LogTrace("GetCertificateType: productId='{ProductId}'", productId ?? "(null)");
+        if (!string.IsNullOrEmpty(productId) && ProductIdToCodeMap.TryGetValue(productId, out var code))
         {
-            case "CSC TrustedSecure Premium Certificate":
-                return "0";
-            case "CSC TrustedSecure EV Certificate":
-                return "3";
-            case "CSC TrustedSecure UC Certificate":
-                return "2";
-            case "CSC TrustedSecure Premium Wildcard Certificate":
-                return "1";
-            case "CSC Trusted Secure Domain Validated SSL":
-                return "4";
-            case "CSC Trusted Secure Domain Validated Wildcard SSL":
-                return "5";
-            case "CSC Trusted Secure Domain Validated UC Certificate":
-                return "6";
-            case "CSC TrustedSecure Domain Validated SSL":
-                return "4";
-            case "CSC TrustedSecure Domain Validated Wildcard SSL":
-                return "5";
-            case "CSC TrustedSecure Domain Validated UC Certificate":
-                return "6";
+            Logger.LogTrace("GetCertificateType: mapped '{ProductId}' -> '{Code}'", productId, code);
+            return code;
         }
-
+        Logger.LogWarning("GetCertificateType: no mapping found for '{ProductId}', returning -1.", productId);
         return "-1";
+    }
+
+    /// <summary>
+    ///     Maps a CSC API certificateType value back to a Keyfactor product ID.
+    ///     Handles numeric codes, descriptive strings, and passthrough of already-correct values.
+    /// </summary>
+    public string MapCertificateTypeToProductId(string cscCertificateType)
+    {
+        Logger.LogTrace("MapCertificateTypeToProductId: input='{CscCertType}'", cscCertificateType ?? "(null)");
+        if (!string.IsNullOrEmpty(cscCertificateType) && CodeToProductIdMap.TryGetValue(cscCertificateType, out var productId))
+        {
+            Logger.LogTrace("MapCertificateTypeToProductId: mapped '{CscCertType}' -> '{ProductId}'", cscCertificateType, productId);
+            return productId;
+        }
+        Logger.LogWarning("MapCertificateTypeToProductId: no mapping for '{CscCertType}', passing through as-is.", cscCertificateType);
+        return cscCertificateType ?? "CscGlobal";
     }
 
     public Notifications GetNotifications(EnrollmentProductInfo productInfo)

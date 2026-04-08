@@ -319,9 +319,10 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
             if (certStatus == Convert.ToInt32(EndEntityStatus.GENERATED) ||
                 certStatus == Convert.ToInt32(EndEntityStatus.REVOKED))
             {
-                var productId = currentResponseItem.CertificateType ?? "CscGlobal";
+                var productId = _requestManager.MapCertificateTypeToProductId(currentResponseItem.CertificateType);
 
-                Logger.LogTrace("SyncCertificates: UUID={Uuid} qualifies for sync. ProductId='{ProductId}'", currentResponseItem.Uuid, productId);
+                Logger.LogTrace("SyncCertificates: UUID={Uuid} qualifies for sync. CertificateType='{CertType}' -> ProductId='{ProductId}'",
+                    currentResponseItem.Uuid, currentResponseItem.CertificateType ?? "(null)", productId);
 
                 string fileContent;
                 try
