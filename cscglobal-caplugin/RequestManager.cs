@@ -106,11 +106,13 @@ public class RequestManager
         }
 
         var commonName = renewResponse.Result?.CommonName ?? "(unknown)";
-        Logger.LogTrace("GetRenewResponse: renewal succeeded for CommonName='{CommonName}'", commonName);
+        var uuid = renewResponse.Result?.Status?.Uuid;
+        Logger.LogTrace("GetRenewResponse: renewal succeeded for CommonName='{CommonName}', UUID='{Uuid}'", commonName, uuid ?? "(null)");
         return new EnrollmentResult
         {
-            Status = (int)EndEntityStatus.GENERATED,
-            StatusMessage = $"Renewal Successfully Completed For {commonName}"
+            Status = (int)EndEntityStatus.EXTERNALVALIDATION,
+            CARequestID = uuid,
+            StatusMessage = $"Renewal Successfully Submitted For {commonName}. Certificate will be available after next sync."
         };
     }
 
@@ -273,9 +275,9 @@ public class RequestManager
 
         return new EnrollmentResult
         {
-            Status = (int)EndEntityStatus.GENERATED,
+            Status = (int)EndEntityStatus.EXTERNALVALIDATION,
             CARequestID = uuid,
-            StatusMessage = $"Reissue Successfully Completed For {commonName}"
+            StatusMessage = $"Reissue Successfully Submitted For {commonName}. Certificate will be available after next sync."
         };
     }
 
