@@ -86,7 +86,6 @@ This integration is tested and confirmed as working for Anygateway REST 24.2 and
         * **ApiKey** - CSCGlobal API Key 
         * **BearerToken** - CSCGlobal Bearer Token 
         * **DefaultPageSize** - Default page size for use with the API. Default is 100 
-        * **TemplateSync** - Enable template sync. 
         * **SyncFilterDays** - Number of days from today to filter certificates by expiration date during incremental sync. 
         * **RenewalWindowDays** - Number of days before the annual order expiry within which a RenewOrReissue triggers a paid Renewal rather than a free Reissue. Default is 30. 
 
