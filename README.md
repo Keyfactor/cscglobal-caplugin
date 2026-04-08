@@ -1,5 +1,5 @@
 <h1 align="center" style="border-bottom: none">
-    CSCGlobal CA  Gateway AnyCA Gateway REST Plugin
+    CSCGlobal CAPlugin AnyCA Gateway REST Plugin
 </h1>
 
 <p align="center">
@@ -38,10 +38,10 @@ This integration allows for the Synchronization, Enrollment, and Revocation of c
 
 ## Compatibility
 
-The CSCGlobal CA  Gateway AnyCA Gateway REST plugin is compatible with the Keyfactor AnyCA Gateway REST 24.2.0 and later.
+The CSCGlobal CAPlugin AnyCA Gateway REST plugin is compatible with the Keyfactor AnyCA Gateway REST 24.2.0 and later.
 
 ## Support
-The CSCGlobal CA  Gateway AnyCA Gateway REST plugin is supported by Keyfactor for Keyfactor customers. If you have a support issue, please open a support ticket with your Keyfactor representative. If you have a support issue, please open a support ticket via the Keyfactor Support Portal at https://support.keyfactor.com. 
+The CSCGlobal CAPlugin AnyCA Gateway REST plugin is supported by Keyfactor for Keyfactor customers. If you have a support issue, please open a support ticket with your Keyfactor representative. If you have a support issue, please open a support ticket via the Keyfactor Support Portal at https://support.keyfactor.com. 
 
 > To report a problem or suggest a new feature, use the **[Issues](../../issues)** tab. If you want to contribute actual bug fixes or proposed enhancements, use the **[Pull requests](../../pulls)** tab.
 
@@ -53,7 +53,7 @@ This integration is tested and confirmed as working for Anygateway REST 24.2 and
 
 1. Install the AnyCA Gateway REST per the [official Keyfactor documentation](https://software.keyfactor.com/Guides/AnyCAGatewayREST/Content/AnyCAGatewayREST/InstallIntroduction.htm).
 
-2. On the server hosting the AnyCA Gateway REST, download and unzip the latest [CSCGlobal CA  Gateway AnyCA Gateway REST plugin](https://github.com/Keyfactor/cscglobal-caplugin/releases/latest) from GitHub.
+2. On the server hosting the AnyCA Gateway REST, download and unzip the latest [CSCGlobal CAPlugin AnyCA Gateway REST plugin](https://github.com/Keyfactor/cscglobal-caplugin/releases/latest) from GitHub.
 
 3. Copy the unzipped directory (usually called `net6.0` or `net8.0`) to the Extensions directory:
 
@@ -64,11 +64,11 @@ This integration is tested and confirmed as working for Anygateway REST 24.2 and
     Program Files\Keyfactor\AnyCA Gateway\AnyGatewayREST\net8.0\Extensions
     ```
 
-    > The directory containing the CSCGlobal CA  Gateway AnyCA Gateway REST plugin DLLs (`net6.0` or `net8.0`) can be named anything, as long as it is unique within the `Extensions` directory.
+    > The directory containing the CSCGlobal CAPlugin AnyCA Gateway REST plugin DLLs (`net6.0` or `net8.0`) can be named anything, as long as it is unique within the `Extensions` directory.
 
 4. Restart the AnyCA Gateway REST service.
 
-5. Navigate to the AnyCA Gateway REST portal and verify that the Gateway recognizes the CSCGlobal CA  Gateway plugin by hovering over the ⓘ symbol to the right of the Gateway on the top left of the portal.
+5. Navigate to the AnyCA Gateway REST portal and verify that the Gateway recognizes the CSCGlobal CAPlugin plugin by hovering over the ⓘ symbol to the right of the Gateway on the top left of the portal.
 
 ## Configuration
 
@@ -88,6 +88,7 @@ This integration is tested and confirmed as working for Anygateway REST 24.2 and
         * **DefaultPageSize** - Default page size for use with the API. Default is 100 
         * **TemplateSync** - Enable template sync. 
         * **SyncFilterDays** - Number of days from today to filter certificates by expiration date during incremental sync. 
+        * **RenewalWindowDays** - Number of days before the annual order expiry within which a RenewOrReissue triggers a paid Renewal rather than a free Reissue. Default is 30. 
 
 2. PLEASE NOTE, AT THIS TIME THE RAPID_SSL TEMPLATE IS NOT SUPPORTED BY THE CSC API AND WILL NOT WORK WITH THIS INTEGRATION
 

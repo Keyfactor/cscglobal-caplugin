@@ -36,6 +36,10 @@
                 {
                     "name": "SyncFilterDays",
                     "description": "Number of days from today to filter certificates by expiration date during incremental sync."
+                },
+                {
+                    "name": "RenewalWindowDays",
+                    "description": "Number of days before the annual order expiry within which a RenewOrReissue triggers a paid Renewal rather than a free Reissue. Default is 30."
                 }
             ],
             "enrollment_config": [
