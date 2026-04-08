@@ -389,41 +389,45 @@ public class RequestManager
         ["CSC TrustedSecure EV Certificate"] = "3",
         ["CSC TrustedSecure Domain Validated SSL"] = "4",
         ["CSC Trusted Secure Domain Validated SSL"] = "4",
-        ["CSC TrustedSecure Domain Validated Wildcard SSL"] = "5",
         ["CSC Trusted Secure Domain Validated Wildcard SSL"] = "5",
-        ["CSC TrustedSecure Domain Validated UC Certificate"] = "6",
         ["CSC Trusted Secure Domain Validated UC Certificate"] = "6",
     };
 
-    // Reverse map: CSC API certificate type string -> Keyfactor product ID (used during sync)
-    // CSC may return numeric codes ("0","1") or descriptive strings ("Premium","EV","UC", etc.)
+    // Reverse map: CSC API certificateType string -> Keyfactor product ID (used during sync)
+    // Note: CSC naming is inconsistent — first 4 types use "TrustedSecure" (no space),
+    //       DV Wildcard and DV UC use "Trusted Secure" (with space),
+    //       but CSC API returns DV SSL as "CSC Trusted Secure Domain Validated SSL" (with space)
+    //       while the product ID is "CSC TrustedSecure Domain Validated SSL" (no space).
     private static readonly Dictionary<string, string> CodeToProductIdMap = new(StringComparer.OrdinalIgnoreCase)
     {
+        // Premium
         ["0"] = "CSC TrustedSecure Premium Certificate",
-        ["Premium"] = "CSC TrustedSecure Premium Certificate",
         ["CSC TrustedSecure Premium Certificate"] = "CSC TrustedSecure Premium Certificate",
+        ["CSC Trusted Secure Premium Certificate"] = "CSC TrustedSecure Premium Certificate",
+        // Premium Wildcard
         ["1"] = "CSC TrustedSecure Premium Wildcard Certificate",
-        ["Wildcard"] = "CSC TrustedSecure Premium Wildcard Certificate",
-        ["Premium Wildcard"] = "CSC TrustedSecure Premium Wildcard Certificate",
         ["CSC TrustedSecure Premium Wildcard Certificate"] = "CSC TrustedSecure Premium Wildcard Certificate",
+        ["CSC Trusted Secure Premium Wildcard Certificate"] = "CSC TrustedSecure Premium Wildcard Certificate",
+        // UC
         ["2"] = "CSC TrustedSecure UC Certificate",
-        ["UC"] = "CSC TrustedSecure UC Certificate",
         ["CSC TrustedSecure UC Certificate"] = "CSC TrustedSecure UC Certificate",
+        ["CSC Trusted Secure UC Certificate"] = "CSC TrustedSecure UC Certificate",
+        // EV
         ["3"] = "CSC TrustedSecure EV Certificate",
-        ["EV"] = "CSC TrustedSecure EV Certificate",
         ["CSC TrustedSecure EV Certificate"] = "CSC TrustedSecure EV Certificate",
+        ["CSC Trusted Secure EV Certificate"] = "CSC TrustedSecure EV Certificate",
+        // DV SSL — product ID has no space, but CSC API returns with space
         ["4"] = "CSC TrustedSecure Domain Validated SSL",
-        ["DV"] = "CSC TrustedSecure Domain Validated SSL",
-        ["Domain Validated SSL"] = "CSC TrustedSecure Domain Validated SSL",
         ["CSC TrustedSecure Domain Validated SSL"] = "CSC TrustedSecure Domain Validated SSL",
-        ["5"] = "CSC TrustedSecure Domain Validated Wildcard SSL",
-        ["DV Wildcard"] = "CSC TrustedSecure Domain Validated Wildcard SSL",
-        ["Domain Validated Wildcard SSL"] = "CSC TrustedSecure Domain Validated Wildcard SSL",
-        ["CSC TrustedSecure Domain Validated Wildcard SSL"] = "CSC TrustedSecure Domain Validated Wildcard SSL",
-        ["6"] = "CSC TrustedSecure Domain Validated UC Certificate",
-        ["DV UC"] = "CSC TrustedSecure Domain Validated UC Certificate",
-        ["Domain Validated UC Certificate"] = "CSC TrustedSecure Domain Validated UC Certificate",
-        ["CSC TrustedSecure Domain Validated UC Certificate"] = "CSC TrustedSecure Domain Validated UC Certificate",
+        ["CSC Trusted Secure Domain Validated SSL"] = "CSC TrustedSecure Domain Validated SSL",
+        // DV Wildcard — product ID has space (matches CSC API)
+        ["5"] = "CSC Trusted Secure Domain Validated Wildcard SSL",
+        ["CSC Trusted Secure Domain Validated Wildcard SSL"] = "CSC Trusted Secure Domain Validated Wildcard SSL",
+        ["CSC TrustedSecure Domain Validated Wildcard SSL"] = "CSC Trusted Secure Domain Validated Wildcard SSL",
+        // DV UC — product ID has space (matches CSC API)
+        ["6"] = "CSC Trusted Secure Domain Validated UC Certificate",
+        ["CSC Trusted Secure Domain Validated UC Certificate"] = "CSC Trusted Secure Domain Validated UC Certificate",
+        ["CSC TrustedSecure Domain Validated UC Certificate"] = "CSC Trusted Secure Domain Validated UC Certificate",
     };
 
     private string GetCertificateType(string productId)
