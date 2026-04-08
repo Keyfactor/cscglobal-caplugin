@@ -35,8 +35,6 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
 
     private ICscGlobalClient CscGlobalClient { get; set; }
 
-    public bool EnableTemplateSync { get; set; }
-
     public int SyncFilterDays { get; set; }
 
     public int RenewalWindowDays { get; set; }
@@ -76,22 +74,6 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
             }
             Logger.LogTrace("CAConnectionData keys: {Keys}", string.Join(", ", configProvider.CAConnectionData.Keys));
         });
-
-        flow.Step("ReadTemplateSync", () =>
-        {
-            if (configProvider.CAConnectionData.ContainsKey("TemplateSync"))
-            {
-                var templateSync = configProvider.CAConnectionData["TemplateSync"]?.ToString();
-                Logger.LogTrace("TemplateSync raw value: '{Value}'", templateSync ?? "(null)");
-                if (!string.IsNullOrEmpty(templateSync) && templateSync.ToUpper() == "ON")
-                    EnableTemplateSync = true;
-            }
-            else
-            {
-                Logger.LogTrace("TemplateSync key not found in CAConnectionData, defaulting to disabled.");
-            }
-            Logger.LogTrace("EnableTemplateSync = {Value}", EnableTemplateSync);
-        }, $"EnableTemplateSync={EnableTemplateSync}");
 
         flow.Step("ReadSyncFilterDays", () =>
         {
@@ -337,9 +319,7 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
             if (certStatus == Convert.ToInt32(EndEntityStatus.GENERATED) ||
                 certStatus == Convert.ToInt32(EndEntityStatus.REVOKED))
             {
-                var productId = "CscGlobal";
-                if (EnableTemplateSync)
-                    productId = currentResponseItem.CertificateType ?? "CscGlobal";
+                var productId = currentResponseItem.CertificateType ?? "CscGlobal";
 
                 Logger.LogTrace("SyncCertificates: UUID={Uuid} qualifies for sync. ProductId='{ProductId}'", currentResponseItem.Uuid, productId);
 
@@ -946,13 +926,6 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
                 Hidden = false,
                 DefaultValue = "100",
                 Type = "String"
-            },
-            [Constants.TemplateSync] = new()
-            {
-                Comments = "Enable template sync.",
-                Hidden = false,
-                DefaultValue = "false",
-                Type = "Bool"
             },
             [Constants.SyncFilterDays] = new()
             {
