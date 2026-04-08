@@ -10,6 +10,55 @@ This integration is tested and confirmed as working for Anygateway REST 24.2 and
 
 The Root certificates for installation on the Anygateway server machine should be obtained from CSC.
 
+## CA Connection Configuration
+
+When defining the Certificate Authority in the AnyCA Gateway REST portal, configure the following fields on the **CA Connection** tab:
+
+CONFIG ELEMENT | DESCRIPTION | DEFAULT
+---------------|-------------|--------
+CscGlobalUrl | The base URL for the CSCGlobal API (e.g. `https://apis.cscglobal.com`) | (required)
+ApiKey | Your CSCGlobal API key | (required)
+BearerToken | Your CSCGlobal Bearer token for authentication | (required)
+DefaultPageSize | Page size for API list requests | 100
+SyncFilterDays | Number of days from today used to filter certificates by expiration date during **incremental** sync. Only certificates expiring within this window are returned. Does not apply to full sync. | 5
+RenewalWindowDays | Number of days before the annual order expiry date within which a **RenewOrReissue** request triggers a paid **Renewal** rather than a free **Reissue**. See [Renewal vs. Reissue Logic](#renewal-vs-reissue-logic) below. | 30
+
+## Renewal vs. Reissue Logic
+
+CSC Global subscriptions are annual orders. When Keyfactor Command sends a **RenewOrReissue** request, the plugin must decide whether to submit a **Renewal** (a new paid order) or a **Reissue** (a free re-key under the existing active order).
+
+The decision is based on the **RenewalWindowDays** setting and works as follows:
+
+1. The plugin fetches the original certificate from CSC and reads its `orderDate`.
+2. It computes the **order expiry** as `orderDate + 1 year`.
+3. It calculates **days remaining** until the order expires.
+4. If `days remaining <= RenewalWindowDays`, the request is treated as a **Renewal** (new paid order).
+5. If `days remaining > RenewalWindowDays`, the request is treated as a **Reissue** (free under the active order).
+
+**Example with default RenewalWindowDays = 30:**
+
+```
+Order Date:    2025-04-08
+Order Expiry:  2026-04-08
+Today:         2026-03-15
+Days Left:     24
+
+24 <= 30  -->  RENEWAL (new paid order)
+```
+
+```
+Order Date:    2025-04-08
+Order Expiry:  2026-04-08
+Today:         2025-09-01
+Days Left:     219
+
+219 > 30  -->  REISSUE (free under active order)
+```
+
+**Fallback behavior:** If the plugin cannot retrieve the `orderDate` from CSC (e.g., API error or missing field), it falls back to checking the certificate's expiration date. If the certificate is already expired, it treats the request as a Renewal.
+
+**Note:** Both Renewal and Reissue submissions are asynchronous at CSC. The plugin returns a "pending" status and the issued certificate will appear in Keyfactor after the next sync cycle.
+
 ## Certificate Template Creation Step
 
 PLEASE NOTE, AT THIS TIME THE RAPID_SSL TEMPLATE IS NOT SUPPORTED BY THE CSC API AND WILL NOT WORK WITH THIS INTEGRATION
