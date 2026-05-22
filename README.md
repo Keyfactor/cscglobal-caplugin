@@ -324,6 +324,8 @@ DefaultPageSize | Page size for API list requests | 100
 SyncFilterDays | Number of days from today used to filter certificates by expiration date during **incremental** sync. Only certificates expiring within this window are returned. Does not apply to full sync. | 5
 RenewalWindowDays | Number of days before the annual order expiry date within which a **RenewOrReissue** request triggers a paid **Renewal** rather than a free **Reissue**. See [Renewal vs. Reissue Logic](#renewal-vs-reissue-logic) below. | 30
 
+> **Note:** DNS auto-publishing is configured by deploying provider DLLs, not via a CA setting. See [Pluggable DNS Providers](#pluggable-dns-providers).
+
 ## Renewal vs. Reissue Logic
 
 CSC Global subscriptions are annual orders. When Keyfactor Command sends a **RenewOrReissue** request, the plugin must decide whether to submit a **Renewal** (a new paid order) or a **Reissue** (a free re-key under the existing active order).
@@ -359,6 +361,46 @@ Days Left:     219
 **Fallback behavior:** If the plugin cannot retrieve the `orderDate` from CSC (e.g., API error or missing field), it falls back to checking the certificate's expiration date. If the certificate is already expired, it treats the request as a Renewal.
 
 **Note:** Both Renewal and Reissue submissions are asynchronous at CSC. The plugin returns a "pending" status and the issued certificate will appear in Keyfactor after the next sync cycle.
+
+## Pluggable DNS Providers
+
+CSC supports two Domain Control Validation (DCV) methods: **EMAIL** and **CNAME**. With CNAME validation, CSC returns a CNAME record (name → target) that must exist in DNS before they will validate the order.
+
+By default this plugin returns the CNAME details to Keyfactor Command for **manual publishing**. To fully automate enrollment, you can deploy one or more DNS provider DLLs alongside the plugin — the framework will publish each CNAME via the provider that owns the matching DNS zone.
+
+### Behavior
+
+* **Resolution is per record, not per CA.** When a CSC order returns CNAME details, the plugin asks each registered DNS provider `CanHandleDomain(recordName)`. The first provider that claims the zone publishes the record. One CA can drive multiple providers (e.g. Cloudflare for some domains, Route 53 for others) with no per-CA configuration.
+* **Only invoked for CNAME DCV.** Templates configured with EMAIL validation are unaffected.
+* **Best-effort.** If no registered provider owns the zone, or the publish call fails, the enrollment still succeeds and the CNAME details are still surfaced to Keyfactor Command so a human can publish manually as a fallback.
+* **Trace-logged.** Every resolution and publish attempt (success, failure, unresolved) is logged so issues are visible without surprising end users.
+
+### Authoring a DNS Provider
+
+A DNS provider is a separate DLL that implements `Keyfactor.Extensions.CAPlugin.CSCGlobal.Interfaces.IDnsProvider`:
+
+```csharp
+public interface IDnsProvider
+{
+    string Name { get; }
+    bool CanHandleDomain(string recordName);
+    Task<bool> CreateCnameRecordAsync(string recordName, string cnameTarget, CancellationToken cancellationToken = default);
+    Task<bool> DeleteCnameRecordAsync(string recordName, CancellationToken cancellationToken = default);
+}
+```
+
+`CanHandleDomain` is the resolution hook — implementations typically list managed zones from the provider's API (cached at construction time) and return true when `recordName` falls within one of them.
+
+To wire a provider into the gateway:
+
+1. Build the provider as a separate DLL referencing the CSC plugin's `IDnsProvider` interface.
+2. Drop the DLL into the gateway `Extensions` folder alongside this plugin.
+3. Add provider-specific configuration keys to the CA Connection tab (for example `Cloudflare_ApiToken`, `Route53_AccessKey`, `Route53_SecretKey`).
+4. Add a registration line to `DnsProviderFactory.LoadProviders()` that instantiates the provider when its required keys are present.
+
+### Currently Built-In Providers
+
+None at this time. The framework is in place; concrete provider implementations are tracked separately.
 
 
 ## License
