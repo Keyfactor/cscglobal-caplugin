@@ -13,6 +13,7 @@ using System.Text.RegularExpressions;
 using Keyfactor.AnyGateway.Extensions;
 using Keyfactor.Extensions.CAPlugin.CSCGlobal.Client;
 using Keyfactor.Extensions.CAPlugin.CSCGlobal.Client.Models;
+using Keyfactor.Extensions.CAPlugin.CSCGlobal.Dns;
 using Keyfactor.Extensions.CAPlugin.CSCGlobal.Interfaces;
 using Keyfactor.Logging;
 using Keyfactor.PKI.Enums.EJBCA;
@@ -38,6 +39,12 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
     public int SyncFilterDays { get; set; }
 
     public int RenewalWindowDays { get; set; }
+
+    /// <summary>
+    ///     Registry of available DNS providers. Resolution happens per-record at enrollment time
+    ///     so a single CA can publish across multiple DNS providers based on the domain.
+    /// </summary>
+    private DnsProviderFactory? _dnsProviderFactory;
 
     //done
     public void Initialize(IAnyCAPluginConfigProvider configProvider, ICertificateDataReader certificateDataReader)
@@ -114,6 +121,25 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
             }
             Logger.LogDebug("RenewalWindowDays configured to {Days} days", RenewalWindowDays);
         }, $"RenewalWindowDays={RenewalWindowDays}");
+
+        flow.Step("InitDnsProviderRegistry", () =>
+        {
+            try
+            {
+                _dnsProviderFactory = new DnsProviderFactory(configProvider);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "InitDnsProviderRegistry: factory threw, DNS auto-publishing disabled. {Error}", ex.Message);
+                _dnsProviderFactory = null;
+            }
+
+            if (_dnsProviderFactory == null || _dnsProviderFactory.Providers.Count == 0)
+                Logger.LogInformation("No DNS providers registered. CNAME DCV records will require manual publishing.");
+            else
+                Logger.LogInformation("{Count} DNS provider(s) registered for per-domain CNAME DCV auto-publishing.",
+                    _dnsProviderFactory.Providers.Count);
+        });
 
         Logger.MethodExit(LogLevel.Debug);
     }
@@ -565,6 +591,12 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
 
                     var enrollResult = _requestManager.GetEnrollmentResult(enrollmentResponse);
                     flow.Step("MapResult", $"Status={enrollResult?.Status}, ID={enrollResult?.CARequestID ?? "(null)"}");
+
+                    await flow.StepAsync("PublishCnameDcv", async () =>
+                    {
+                        await TryPublishCnameDcvAsync(productInfo, enrollResult);
+                    });
+
                     Logger.MethodExit(LogLevel.Debug);
                     return enrollResult;
 
@@ -1056,6 +1088,99 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
     }
 
     #region PRIVATE
+
+    /// <summary>
+    ///     Attempts to publish CNAME DCV records by resolving an <see cref="IDnsProvider"/> for
+    ///     each record from the <see cref="_dnsProviderFactory"/> registry. Resolution is
+    ///     per-record so different domains can be handled by different DNS providers.
+    ///     No-op if no providers are registered, the cert isn't using CNAME validation, or the
+    ///     response contains no CNAME details. Failures are logged but never thrown — manual
+    ///     publishing remains a fallback so the enrollment result is still returned to Keyfactor.
+    /// </summary>
+    private async Task TryPublishCnameDcvAsync(EnrollmentProductInfo productInfo, EnrollmentResult? enrollResult)
+    {
+        if (_dnsProviderFactory == null || _dnsProviderFactory.Providers.Count == 0)
+        {
+            Logger.LogTrace("TryPublishCnameDcvAsync: no DNS providers registered, skipping auto-publish.");
+            return;
+        }
+
+        if (enrollResult?.EnrollmentContext == null || enrollResult.EnrollmentContext.Count == 0)
+        {
+            Logger.LogTrace("TryPublishCnameDcvAsync: no CNAME entries in EnrollmentContext, skipping.");
+            return;
+        }
+
+        var dcvMethod = productInfo?.ProductParameters != null
+            && productInfo.ProductParameters.TryGetValue(EnrollmentConfigConstants.DomainControlValidationMethod, out var m)
+            ? m
+            : null;
+
+        if (string.IsNullOrEmpty(dcvMethod) ||
+            !string.Equals(dcvMethod, "CNAME", StringComparison.OrdinalIgnoreCase))
+        {
+            Logger.LogTrace("TryPublishCnameDcvAsync: DCV method '{Method}' is not CNAME, skipping auto-publish.", dcvMethod ?? "(null)");
+            return;
+        }
+
+        Logger.LogInformation("TryPublishCnameDcvAsync: attempting to publish {Count} CNAME record(s) via registered DNS providers.",
+            enrollResult.EnrollmentContext.Count);
+
+        var successCount = 0;
+        var failCount = 0;
+        var unresolvedCount = 0;
+
+        foreach (var entry in enrollResult.EnrollmentContext)
+        {
+            var recordName = entry.Key;
+            var cnameTarget = entry.Value;
+
+            // CSC may also surface DCV email entries in this dictionary (key == value). Skip those.
+            if (string.Equals(recordName, cnameTarget, StringComparison.OrdinalIgnoreCase))
+            {
+                Logger.LogTrace("TryPublishCnameDcvAsync: skipping entry '{Key}' (looks like an email DCV passthrough, not a CNAME).", recordName);
+                continue;
+            }
+
+            var provider = _dnsProviderFactory.ResolveForDomain(recordName);
+            if (provider == null)
+            {
+                unresolvedCount++;
+                Logger.LogWarning(
+                    "TryPublishCnameDcvAsync: no registered DNS provider claims '{Record}'. Manual publish required for this record.",
+                    recordName);
+                continue;
+            }
+
+            try
+            {
+                Logger.LogTrace("TryPublishCnameDcvAsync: creating CNAME '{Name}' -> '{Target}' via '{Provider}'.",
+                    recordName, cnameTarget, provider.Name);
+                var ok = await provider.CreateCnameRecordAsync(recordName, cnameTarget);
+                if (ok)
+                {
+                    successCount++;
+                    Logger.LogInformation("Published CNAME '{Name}' -> '{Target}' via '{Provider}'.", recordName, cnameTarget, provider.Name);
+                }
+                else
+                {
+                    failCount++;
+                    Logger.LogWarning("DNS provider '{Provider}' reported failure publishing CNAME '{Name}'. Manual publish may be required.",
+                        provider.Name, recordName);
+                }
+            }
+            catch (Exception ex)
+            {
+                failCount++;
+                Logger.LogError(ex, "DNS provider '{Provider}' threw publishing CNAME '{Name}'. Manual publish may be required. {Error}",
+                    provider.Name, recordName, ex.Message);
+            }
+        }
+
+        Logger.LogInformation(
+            "TryPublishCnameDcvAsync: complete. Published={Published}, Failed={Failed}, Unresolved={Unresolved}",
+            successCount, failCount, unresolvedCount);
+    }
 
     //Trying to fix leaf extraction
     private static readonly Regex PemBlock = new(
