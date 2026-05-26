@@ -87,7 +87,7 @@ By default this plugin returns the CNAME details to Keyfactor Command for **manu
 * **Only invoked for CNAME DCV.** Templates configured with EMAIL validation are unaffected — no DNS publishing occurs.
 * **Best-effort.** If no provider claims the zone, the publish call fails, or the factory wasn't injected (gateway pre-3.3), the enrollment still succeeds and the CNAME details remain in the Keyfactor request so a human can publish manually as a fallback.
 * **Trace-logged.** Every resolution (matched/unresolved) and publish attempt (success/failure) is logged at Info/Trace level.
-* **Validation type string.** The plugin passes `"cname"` to `ResolveDomainValidator`. The DNS provider you deploy must advertise support for that validation type (via its `GetValidationType()` method) or it won't be matched.
+* **Validation type string.** The plugin passes `"dns-01"` to `ResolveDomainValidator`. This is the de-facto standard string used by the Keyfactor DNS provider plugins (GoDaddy, Cloudflare, Route 53, Azure) — originally from ACME's DNS-01 challenge, but used generically as a "publishes DNS records" capability tag. The DNS provider you deploy must advertise support for `"dns-01"` (via its `GetValidationType()` method) or it won't be matched. The underlying `StageValidation(key, value, ct)` call is generic, and the provider implementation decides whether to publish a CNAME or TXT based on the value supplied.
 
 ### Configuration in the Gateway UI
 

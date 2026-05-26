@@ -25,10 +25,14 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
 {
     /// <summary>
     ///     Validation type string passed to <see cref="IDomainValidatorFactory.ResolveDomainValidator"/>.
-    ///     CSC's Domain Control Validation publishes a CNAME record, so we ask the framework for a
-    ///     validator that handles the "cname" challenge type.
+    ///     DNS provider plugins in the Keyfactor ecosystem (GoDaddy, Cloudflare, Route 53, Azure, etc.)
+    ///     standardize on "dns-01" as their advertised validation type — originally from ACME's
+    ///     DNS-01 challenge, but in practice used as a generic "publishes DNS records" capability tag.
+    ///     CSC's Domain Control Validation publishes a CNAME (not a TXT), but the underlying
+    ///     <see cref="IDomainValidator.StageValidation"/> call is generic key/value — the provider
+    ///     publishes whatever record type its implementation chooses.
     /// </summary>
-    private const string DNS_VALIDATION_TYPE = "cname";
+    private const string DNS_VALIDATION_TYPE = "dns-01";
 
     private readonly RequestManager _requestManager;
     private readonly ILogger Logger;
