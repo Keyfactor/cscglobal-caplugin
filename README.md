@@ -324,7 +324,7 @@ DefaultPageSize | Page size for API list requests | 100
 SyncFilterDays | Number of days from today used to filter certificates by expiration date during **incremental** sync. Only certificates expiring within this window are returned. Does not apply to full sync. | 5
 RenewalWindowDays | Number of days before the annual order expiry date within which a **RenewOrReissue** request triggers a paid **Renewal** rather than a free **Reissue**. See [Renewal vs. Reissue Logic](#renewal-vs-reissue-logic) below. | 30
 
-> **Note:** DNS auto-publishing is configured by deploying provider DLLs, not via a CA setting. See [Pluggable DNS Providers](#pluggable-dns-providers).
+> **Note:** DNS auto-publishing for CNAME DCV is handled by the AnyCA Gateway REST framework's Domain Validation system (gateway 3.3+). It's configured in the gateway UI under **Domain Validation Configurations**, not on the CA Connection tab. See [DNS Auto-Publishing (CNAME DCV)](#dns-auto-publishing-cname-dcv).
 
 ## Renewal vs. Reissue Logic
 
@@ -362,45 +362,45 @@ Days Left:     219
 
 **Note:** Both Renewal and Reissue submissions are asynchronous at CSC. The plugin returns a "pending" status and the issued certificate will appear in Keyfactor after the next sync cycle.
 
-## Pluggable DNS Providers
+## DNS Auto-Publishing (CNAME DCV)
 
 CSC supports two Domain Control Validation (DCV) methods: **EMAIL** and **CNAME**. With CNAME validation, CSC returns a CNAME record (name → target) that must exist in DNS before they will validate the order.
 
-By default this plugin returns the CNAME details to Keyfactor Command for **manual publishing**. To fully automate enrollment, you can deploy one or more DNS provider DLLs alongside the plugin — the framework will publish each CNAME via the provider that owns the matching DNS zone.
+By default this plugin returns the CNAME details to Keyfactor Command for **manual publishing**. To fully automate enrollment, the plugin uses the **AnyCA Gateway REST framework's built-in DNS provider system** (available in framework 3.3 and later). The framework discovers DNS provider plugins deployed alongside the CA plugin and routes each CNAME to whichever provider claims the matching DNS zone.
+
+### Requirements
+
+* AnyCA Gateway REST framework **3.3 or later** (the `IDomainValidatorFactory` interface ships in `Keyfactor.AnyGateway.IAnyCAPlugin` 3.3+).
+* At least one DNS provider DLL (e.g. GoDaddy, Cloudflare, Route 53, Azure) deployed in the gateway `Extensions` folder.
+* A Domain Validation Configuration registered in the gateway UI that maps your domain(s) to the deployed provider (for example, `*.example.com` → GoDaddy).
+
+### How It Works
+
+1. CSC returns the CNAME `name → target` details in the enrollment response.
+2. For each CNAME entry, the plugin calls `IDomainValidatorFactory.ResolveDomainValidator(recordName, "cname")`.
+3. The framework returns the `IDomainValidator` whose Domain Validation Configuration matches the record's zone (or `null` if no match).
+4. The plugin calls `validator.StageValidation(recordName, cnameTarget, ct)` to publish the record.
+5. CSC asynchronously validates the CNAME; the issued certificate appears on the next sync.
 
 ### Behavior
 
-* **Resolution is per record, not per CA.** When a CSC order returns CNAME details, the plugin asks each registered DNS provider `CanHandleDomain(recordName)`. The first provider that claims the zone publishes the record. One CA can drive multiple providers (e.g. Cloudflare for some domains, Route 53 for others) with no per-CA configuration.
-* **Only invoked for CNAME DCV.** Templates configured with EMAIL validation are unaffected.
-* **Best-effort.** If no registered provider owns the zone, or the publish call fails, the enrollment still succeeds and the CNAME details are still surfaced to Keyfactor Command so a human can publish manually as a fallback.
-* **Trace-logged.** Every resolution and publish attempt (success, failure, unresolved) is logged so issues are visible without surprising end users.
+* **Resolution is per record, not per CA.** One CA can drive multiple DNS providers (GoDaddy for some domains, Route 53 for others) with no per-CA configuration.
+* **Only invoked for CNAME DCV.** Templates configured with EMAIL validation are unaffected — no DNS publishing occurs.
+* **Best-effort.** If no provider claims the zone, the publish call fails, or the factory wasn't injected (gateway pre-3.3), the enrollment still succeeds and the CNAME details remain in the Keyfactor request so a human can publish manually as a fallback.
+* **Trace-logged.** Every resolution (matched/unresolved) and publish attempt (success/failure) is logged at Info/Trace level.
+* **Validation type string.** The plugin passes `"cname"` to `ResolveDomainValidator`. The DNS provider you deploy must advertise support for that validation type (via its `GetValidationType()` method) or it won't be matched.
 
-### Authoring a DNS Provider
+### Configuration in the Gateway UI
 
-A DNS provider is a separate DLL that implements `Keyfactor.Extensions.CAPlugin.CSCGlobal.Interfaces.IDnsProvider`:
+In the AnyCA Gateway REST portal, under **Domain Validation Configurations**:
 
-```csharp
-public interface IDnsProvider
-{
-    string Name { get; }
-    bool CanHandleDomain(string recordName);
-    Task<bool> CreateCnameRecordAsync(string recordName, string cnameTarget, CancellationToken cancellationToken = default);
-    Task<bool> DeleteCnameRecordAsync(string recordName, CancellationToken cancellationToken = default);
-}
-```
+1. **Add** a new configuration.
+2. Pick the **Domain Validator** (e.g. `GoDaddyDnsPlugin`) — these come from the DNS provider DLLs you've dropped in `Extensions/`.
+3. Add one or more **domain patterns** (e.g. `*.example.com`).
+4. Fill out the provider-specific **Configuration Settings** (API keys, zone IDs, etc.).
+5. Save.
 
-`CanHandleDomain` is the resolution hook — implementations typically list managed zones from the provider's API (cached at construction time) and return true when `recordName` falls within one of them.
-
-To wire a provider into the gateway:
-
-1. Build the provider as a separate DLL referencing the CSC plugin's `IDnsProvider` interface.
-2. Drop the DLL into the gateway `Extensions` folder alongside this plugin.
-3. Add provider-specific configuration keys to the CA Connection tab (for example `Cloudflare_ApiToken`, `Route53_AccessKey`, `Route53_SecretKey`).
-4. Add a registration line to `DnsProviderFactory.LoadProviders()` that instantiates the provider when its required keys are present.
-
-### Currently Built-In Providers
-
-None at this time. The framework is in place; concrete provider implementations are tracked separately.
+Once configured, any CSC enrollment for a domain matching one of those patterns will have its CNAME auto-published.
 
 
 ## License
