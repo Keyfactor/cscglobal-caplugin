@@ -13,7 +13,6 @@ using System.Text.RegularExpressions;
 using Keyfactor.AnyGateway.Extensions;
 using Keyfactor.Extensions.CAPlugin.CSCGlobal.Client;
 using Keyfactor.Extensions.CAPlugin.CSCGlobal.Client.Models;
-using Keyfactor.Extensions.CAPlugin.CSCGlobal.Dns;
 using Keyfactor.Extensions.CAPlugin.CSCGlobal.Interfaces;
 using Keyfactor.Logging;
 using Keyfactor.PKI.Enums.EJBCA;
@@ -24,14 +23,39 @@ namespace Keyfactor.Extensions.CAPlugin.CSCGlobal;
 
 public class CSCGlobalCAPlugin : IAnyCAPlugin
 {
+    /// <summary>
+    ///     Validation type string passed to <see cref="IDomainValidatorFactory.ResolveDomainValidator"/>.
+    ///     CSC's Domain Control Validation publishes a CNAME record, so we ask the framework for a
+    ///     validator that handles the "cname" challenge type.
+    /// </summary>
+    private const string DNS_VALIDATION_TYPE = "cname";
+
     private readonly RequestManager _requestManager;
     private readonly ILogger Logger;
+    private readonly IDomainValidatorFactory? _validatorFactory;
     private ICertificateDataReader _certificateDataReader;
 
+    /// <summary>
+    ///     Parameterless constructor retained for compatibility with older gateway hosts that don't
+    ///     perform DI. When constructed this way the plugin runs without DNS auto-publishing.
+    /// </summary>
     public CSCGlobalCAPlugin()
     {
         Logger = LogHandler.GetClassLogger<CSCGlobalCAPlugin>();
         _requestManager = new RequestManager();
+        _validatorFactory = null;
+    }
+
+    /// <summary>
+    ///     DI constructor used by AnyCA Gateway 3.3+ which injects the framework's domain validator
+    ///     factory. When non-null, CNAME DCV records returned by CSC are auto-published via the
+    ///     framework's registered DNS providers (resolved per-domain).
+    /// </summary>
+    public CSCGlobalCAPlugin(IDomainValidatorFactory validatorFactory)
+    {
+        Logger = LogHandler.GetClassLogger<CSCGlobalCAPlugin>();
+        _requestManager = new RequestManager();
+        _validatorFactory = validatorFactory;
     }
 
     private ICscGlobalClient CscGlobalClient { get; set; }
@@ -39,12 +63,6 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
     public int SyncFilterDays { get; set; }
 
     public int RenewalWindowDays { get; set; }
-
-    /// <summary>
-    ///     Registry of available DNS providers. Resolution happens per-record at enrollment time
-    ///     so a single CA can publish across multiple DNS providers based on the domain.
-    /// </summary>
-    private DnsProviderFactory? _dnsProviderFactory;
 
     //done
     public void Initialize(IAnyCAPluginConfigProvider configProvider, ICertificateDataReader certificateDataReader)
@@ -122,23 +140,15 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
             Logger.LogDebug("RenewalWindowDays configured to {Days} days", RenewalWindowDays);
         }, $"RenewalWindowDays={RenewalWindowDays}");
 
-        flow.Step("InitDnsProviderRegistry", () =>
+        flow.Step("CheckDnsValidatorFactory", () =>
         {
-            try
-            {
-                _dnsProviderFactory = new DnsProviderFactory(configProvider);
-            }
-            catch (Exception ex)
-            {
-                Logger.LogError(ex, "InitDnsProviderRegistry: factory threw, DNS auto-publishing disabled. {Error}", ex.Message);
-                _dnsProviderFactory = null;
-            }
-
-            if (_dnsProviderFactory == null || _dnsProviderFactory.Providers.Count == 0)
-                Logger.LogInformation("No DNS providers registered. CNAME DCV records will require manual publishing.");
+            if (_validatorFactory == null)
+                Logger.LogInformation(
+                    "No IDomainValidatorFactory was injected by the gateway host. CNAME DCV records will require manual publishing.");
             else
-                Logger.LogInformation("{Count} DNS provider(s) registered for per-domain CNAME DCV auto-publishing.",
-                    _dnsProviderFactory.Providers.Count);
+                Logger.LogInformation(
+                    "IDomainValidatorFactory available from gateway host. CNAME DCV records will be auto-published per-domain via the framework's registered DNS providers (validation type '{Type}').",
+                    DNS_VALIDATION_TYPE);
         });
 
         Logger.MethodExit(LogLevel.Debug);
@@ -1090,18 +1100,17 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
     #region PRIVATE
 
     /// <summary>
-    ///     Attempts to publish CNAME DCV records by resolving an <see cref="IDnsProvider"/> for
-    ///     each record from the <see cref="_dnsProviderFactory"/> registry. Resolution is
-    ///     per-record so different domains can be handled by different DNS providers.
-    ///     No-op if no providers are registered, the cert isn't using CNAME validation, or the
-    ///     response contains no CNAME details. Failures are logged but never thrown — manual
-    ///     publishing remains a fallback so the enrollment result is still returned to Keyfactor.
+    ///     Publishes CNAME DCV records via the gateway framework's <see cref="IDomainValidatorFactory"/>.
+    ///     Per-record resolution: each record is routed to whichever DNS provider plugin the framework
+    ///     resolves for its domain. No-op if the factory wasn't injected, the cert isn't using CNAME
+    ///     validation, or the response contains no CNAME details. Failures are logged but never thrown —
+    ///     manual publishing remains a fallback so the enrollment result is still returned to Keyfactor.
     /// </summary>
     private async Task TryPublishCnameDcvAsync(EnrollmentProductInfo productInfo, EnrollmentResult? enrollResult)
     {
-        if (_dnsProviderFactory == null || _dnsProviderFactory.Providers.Count == 0)
+        if (_validatorFactory == null)
         {
-            Logger.LogTrace("TryPublishCnameDcvAsync: no DNS providers registered, skipping auto-publish.");
+            Logger.LogTrace("TryPublishCnameDcvAsync: no IDomainValidatorFactory was injected, skipping auto-publish.");
             return;
         }
 
@@ -1123,8 +1132,9 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
             return;
         }
 
-        Logger.LogInformation("TryPublishCnameDcvAsync: attempting to publish {Count} CNAME record(s) via registered DNS providers.",
-            enrollResult.EnrollmentContext.Count);
+        Logger.LogInformation(
+            "TryPublishCnameDcvAsync: attempting to publish {Count} CNAME record(s) via framework DNS providers (validation type '{Type}').",
+            enrollResult.EnrollmentContext.Count, DNS_VALIDATION_TYPE);
 
         var successCount = 0;
         var failCount = 0;
@@ -1142,38 +1152,53 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
                 continue;
             }
 
-            var provider = _dnsProviderFactory.ResolveForDomain(recordName);
-            if (provider == null)
+            IDomainValidator? validator;
+            try
+            {
+                validator = _validatorFactory.ResolveDomainValidator(recordName, DNS_VALIDATION_TYPE);
+            }
+            catch (Exception ex)
+            {
+                unresolvedCount++;
+                Logger.LogWarning(ex, "ResolveDomainValidator threw for '{Record}' (type '{Type}'): {Error}",
+                    recordName, DNS_VALIDATION_TYPE, ex.Message);
+                continue;
+            }
+
+            if (validator == null)
             {
                 unresolvedCount++;
                 Logger.LogWarning(
-                    "TryPublishCnameDcvAsync: no registered DNS provider claims '{Record}'. Manual publish required for this record.",
-                    recordName);
+                    "No DNS provider matched domain '{Record}' for validation type '{Type}'. Manual publish required for this record.",
+                    recordName, DNS_VALIDATION_TYPE);
                 continue;
             }
 
             try
             {
-                Logger.LogTrace("TryPublishCnameDcvAsync: creating CNAME '{Name}' -> '{Target}' via '{Provider}'.",
-                    recordName, cnameTarget, provider.Name);
-                var ok = await provider.CreateCnameRecordAsync(recordName, cnameTarget);
-                if (ok)
+                Logger.LogTrace("StageValidation: '{Name}' -> '{Target}' via validator type '{ValType}'.",
+                    recordName, cnameTarget, validator.GetValidationType());
+                var result = await validator.StageValidation(recordName, cnameTarget, CancellationToken.None);
+
+                if (result?.Success == true)
                 {
                     successCount++;
-                    Logger.LogInformation("Published CNAME '{Name}' -> '{Target}' via '{Provider}'.", recordName, cnameTarget, provider.Name);
+                    Logger.LogInformation("Published CNAME '{Name}' -> '{Target}' (status='{Status}').",
+                        recordName, cnameTarget, result.Status ?? "(none)");
                 }
                 else
                 {
                     failCount++;
-                    Logger.LogWarning("DNS provider '{Provider}' reported failure publishing CNAME '{Name}'. Manual publish may be required.",
-                        provider.Name, recordName);
+                    Logger.LogWarning(
+                        "StageValidation reported failure for CNAME '{Name}'. Status='{Status}', Error='{Error}'. Manual publish may be required.",
+                        recordName, result?.Status ?? "(none)", result?.ErrorMessage ?? "(none)");
                 }
             }
             catch (Exception ex)
             {
                 failCount++;
-                Logger.LogError(ex, "DNS provider '{Provider}' threw publishing CNAME '{Name}'. Manual publish may be required. {Error}",
-                    provider.Name, recordName, ex.Message);
+                Logger.LogError(ex, "StageValidation threw publishing CNAME '{Name}'. Manual publish may be required. {Error}",
+                    recordName, ex.Message);
             }
         }
 
