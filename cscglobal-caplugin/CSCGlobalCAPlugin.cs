@@ -1104,6 +1104,17 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
     #region PRIVATE
 
     /// <summary>
+    ///     Strip a single trailing dot from a DNS name. CSC returns FQDN-canonical names with
+    ///     a trailing dot but the framework's Domain Validation Configurations are stored without
+    ///     one, so the strings have to be normalized before lookup or the equality check fails.
+    /// </summary>
+    private static string StripTrailingDot(string? s)
+    {
+        if (string.IsNullOrEmpty(s)) return s ?? string.Empty;
+        return s.EndsWith('.') ? s[..^1] : s;
+    }
+
+    /// <summary>
     ///     Publishes CNAME DCV records via the gateway framework's <see cref="IDomainValidatorFactory"/>.
     ///     Per-record resolution: each record is routed to whichever DNS provider plugin the framework
     ///     resolves for its domain. No-op if the factory wasn't injected, the cert isn't using CNAME
@@ -1146,15 +1157,25 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
 
         foreach (var entry in enrollResult.EnrollmentContext)
         {
-            var recordName = entry.Key;
-            var cnameTarget = entry.Value;
+            var rawRecordName = entry.Key;
+            var rawCnameTarget = entry.Value;
 
             // CSC may also surface DCV email entries in this dictionary (key == value). Skip those.
-            if (string.Equals(recordName, cnameTarget, StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(rawRecordName, rawCnameTarget, StringComparison.OrdinalIgnoreCase))
             {
-                Logger.LogTrace("TryPublishCnameDcvAsync: skipping entry '{Key}' (looks like an email DCV passthrough, not a CNAME).", recordName);
+                Logger.LogTrace("TryPublishCnameDcvAsync: skipping entry '{Key}' (looks like an email DCV passthrough, not a CNAME).", rawRecordName);
                 continue;
             }
+
+            // CSC returns FQDN-canonical names with trailing dots (e.g. "foo.example.com.").
+            // The framework's Domain Validation Configuration stores domain patterns without
+            // the trailing dot, so strip it before resolution and publishing or no provider
+            // will match (the framework will look up "*.example.com." which won't equal "*.example.com").
+            var recordName = StripTrailingDot(rawRecordName);
+            var cnameTarget = StripTrailingDot(rawCnameTarget);
+
+            if (recordName != rawRecordName)
+                Logger.LogTrace("TryPublishCnameDcvAsync: normalized record name '{Raw}' -> '{Normalized}'.", rawRecordName, recordName);
 
             IDomainValidator? validator;
             try
