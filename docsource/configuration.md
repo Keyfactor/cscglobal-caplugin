@@ -87,19 +87,22 @@ By default this plugin returns the CNAME details to Keyfactor Command for **manu
 * **Only invoked for CNAME DCV.** Templates configured with EMAIL validation are unaffected — no DNS publishing occurs.
 * **Best-effort.** If no provider claims the zone, the publish call fails, or the factory wasn't injected (gateway pre-3.3), the enrollment still succeeds and the CNAME details remain in the Keyfactor request so a human can publish manually as a fallback.
 * **Trace-logged.** Every resolution (matched/unresolved) and publish attempt (success/failure) is logged at Info/Trace level.
-* **Validation type string.** The plugin passes `"dns-01"` to `ResolveDomainValidator`. This is the de-facto standard string used by the Keyfactor DNS provider plugins (GoDaddy, Cloudflare, Route 53, Azure) — originally from ACME's DNS-01 challenge, but used generically as a "publishes DNS records" capability tag. The DNS provider you deploy must advertise support for `"dns-01"` (via its `GetValidationType()` method) or it won't be matched. The underlying `StageValidation(key, value, ct)` call is generic, and the provider implementation decides whether to publish a CNAME or TXT based on the value supplied.
+* **Validation type string.** The plugin passes `"cname"` to `ResolveDomainValidator`. CSC's DCV requires a **CNAME** record, which is different from ACME's `"dns-01"` challenge (a TXT record). A single DNS provider DLL can ship multiple validator classes — one advertising `"dns-01"` (publishes TXT, for ACME) and one advertising `"cname"` (publishes CNAME, for CSC). You must deploy and configure a validator that advertises `"cname"` or no provider will match.
+* **Trailing dots normalized.** CSC returns FQDN-canonical names with a trailing dot (e.g. `_token.example.com.`). The plugin strips the trailing dot before resolution and publishing, because Domain Validation Configurations and DNS provider APIs expect names without it.
 
 ### Configuration in the Gateway UI
 
 In the AnyCA Gateway REST portal, under **Domain Validation Configurations**:
 
 1. **Add** a new configuration.
-2. Pick the **Domain Validator** (e.g. `GoDaddyDnsPlugin`) — these come from the DNS provider DLLs you've dropped in `Extensions/`.
+2. Pick a **Domain Validator Type** that publishes **CNAME** records and advertises validation type `cname`. For GoDaddy this is `GoDaddyCnameDomainValidator` (the `GoDaddyDomainValidator` variant publishes TXT for ACME and will **not** work for CSC).
 3. Add one or more **domain patterns** (e.g. `*.example.com`).
-4. Fill out the provider-specific **Configuration Settings** (API keys, zone IDs, etc.).
+4. Fill out the provider-specific **Configuration Settings** (API keys, base URL, etc.).
 5. Save.
 
 Once configured, any CSC enrollment for a domain matching one of those patterns will have its CNAME auto-published.
+
+> **Common pitfall:** If you configure the TXT/`dns-01` validator (e.g. `GoDaddyDomainValidator`) for a CSC domain, the record will publish as a **TXT** and CSC's CNAME validation will never succeed. Make sure you select the **CNAME** validator variant.
 
 ## Certificate Template Creation Step
 
