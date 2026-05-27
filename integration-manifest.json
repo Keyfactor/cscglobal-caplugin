@@ -36,6 +36,10 @@
                 {
                     "name": "RenewalWindowDays",
                     "description": "Number of days before the annual order expiry within which a RenewOrReissue triggers a paid Renewal rather than a free Reissue. Default is 30."
+                },
+                {
+                    "name": "DcvPollTimeoutSeconds",
+                    "description": "Max seconds to synchronously poll CSC for issuance after submitting an order (and publishing CNAME DCV). 0 disables polling (enrollment returns pending immediately; cert arrives on next sync). When >0, fast-validating orders can return the cert directly. Keep small to avoid long-blocking enrollment requests."
                 }
             ],
             "enrollment_config": [
