@@ -22,6 +22,7 @@ BearerToken | Your CSCGlobal Bearer token for authentication | (required)
 DefaultPageSize | Page size for API list requests | 100
 SyncFilterDays | Number of days from today used to filter certificates by expiration date during **incremental** sync. Only certificates expiring within this window are returned. Does not apply to full sync. | 5
 RenewalWindowDays | Number of days before the annual order expiry date within which a **RenewOrReissue** request triggers a paid **Renewal** rather than a free **Reissue**. See [Renewal vs. Reissue Logic](#renewal-vs-reissue-logic) below. | 30
+DcvPollTimeoutSeconds | Max seconds to synchronously poll CSC for certificate issuance after submitting an order. `0` disables polling (enrollment returns pending immediately; cert arrives on the next sync). When `>0`, fast-validating orders can return the issued cert directly in the enrollment response. See [Synchronous Issuance Polling](#synchronous-issuance-polling) below. | 0
 
 > **Note:** DNS auto-publishing for CNAME DCV is handled by the AnyCA Gateway REST framework's Domain Validation system (gateway 3.3+). It's configured in the gateway UI under **Domain Validation Configurations**, not on the CA Connection tab. See [DNS Auto-Publishing (CNAME DCV)](#dns-auto-publishing-cname-dcv).
 
@@ -103,6 +104,19 @@ In the AnyCA Gateway REST portal, under **Domain Validation Configurations**:
 Once configured, any CSC enrollment for a domain matching one of those patterns will have its CNAME auto-published.
 
 > **Common pitfall:** If you configure the TXT/`dns-01` validator (e.g. `GoDaddyDomainValidator`) for a CSC domain, the record will publish as a **TXT** and CSC's CNAME validation will never succeed. Make sure you select the **CNAME** validator variant.
+
+## Synchronous Issuance Polling
+
+CSC validates domain control asynchronously — after an order is submitted (and the CNAME DCV record published), CSC/Sectigo polls public DNS on its own schedule and issues the certificate once validation passes. By default this plugin returns a **pending** (`EXTERNALVALIDATION`) result immediately and the issued certificate is picked up on the next gateway **sync** cycle.
+
+For environments where DNS is published automatically (see [DNS Auto-Publishing](#dns-auto-publishing-cname-dcv)) and validation tends to complete quickly, you can have the plugin **poll CSC synchronously** at the end of enrollment and return the issued certificate directly — avoiding the wait for the next sync.
+
+* Set **`DcvPollTimeoutSeconds`** to the maximum number of seconds to poll (e.g. `60`). `0` (default) disables polling entirely.
+* The plugin polls CSC every 10 seconds until the order is issued or the timeout is reached.
+* If the certificate issues within the window, the enrollment returns it immediately with a success status.
+* If the window expires, the plugin falls back to the **pending** result and the certificate arrives on the next sync — exactly as it would with polling disabled.
+
+**Tradeoff:** Polling blocks the enrollment request for up to `DcvPollTimeoutSeconds`. CSC validation frequently takes minutes to hours, so most orders will still fall through to pending — keep the timeout small (30–90s) to catch only the fast cases without hanging callers. This applies to New enrollments, Renewals, and Reissues.
 
 ## Certificate Template Creation Step
 

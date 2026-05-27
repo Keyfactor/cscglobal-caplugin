@@ -32,6 +32,9 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
     /// </summary>
     private const string DNS_VALIDATION_TYPE = "cname";
 
+    /// <summary>Delay between CSC status polls while waiting for DCV to complete.</summary>
+    private static readonly TimeSpan DcvPollInterval = TimeSpan.FromSeconds(10);
+
     private readonly RequestManager _requestManager;
     private readonly ILogger Logger;
     private readonly IDomainValidatorFactory? _validatorFactory;
@@ -65,6 +68,14 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
     public int SyncFilterDays { get; set; }
 
     public int RenewalWindowDays { get; set; }
+
+    /// <summary>
+    ///     Maximum seconds to synchronously poll CSC for certificate issuance after submitting an
+    ///     order (and publishing CNAME DCV). 0 disables polling — the enrollment returns "pending"
+    ///     immediately and the cert is picked up on the next sync. When &gt; 0, fast-validating
+    ///     orders can return the issued cert directly in the enrollment response.
+    /// </summary>
+    public int DcvPollTimeoutSeconds { get; set; }
 
     //done
     public void Initialize(IAnyCAPluginConfigProvider configProvider, ICertificateDataReader certificateDataReader)
@@ -141,6 +152,25 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
             }
             Logger.LogDebug("RenewalWindowDays configured to {Days} days", RenewalWindowDays);
         }, $"RenewalWindowDays={RenewalWindowDays}");
+
+        flow.Step("ReadDcvPollTimeoutSeconds", () =>
+        {
+            DcvPollTimeoutSeconds = 0; // default: disabled
+            if (configProvider.CAConnectionData.TryGetValue(Constants.DcvPollTimeoutSeconds, out var pollObj))
+            {
+                Logger.LogTrace("DcvPollTimeoutSeconds raw value: '{Value}'", pollObj?.ToString() ?? "(null)");
+                if (int.TryParse(pollObj?.ToString(), out var pollSeconds) && pollSeconds >= 0)
+                    DcvPollTimeoutSeconds = pollSeconds;
+                else
+                    Logger.LogWarning("DcvPollTimeoutSeconds value '{Value}' could not be parsed or was < 0, using default 0 (disabled).", pollObj);
+            }
+            else
+            {
+                Logger.LogTrace("DcvPollTimeoutSeconds key not found in CAConnectionData, using default 0 (disabled).");
+            }
+            Logger.LogDebug("DcvPollTimeoutSeconds configured to {Seconds}s ({State})",
+                DcvPollTimeoutSeconds, DcvPollTimeoutSeconds > 0 ? "enabled" : "disabled");
+        });
 
         flow.Step("CheckDnsValidatorFactory", () =>
         {
@@ -609,6 +639,18 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
                         await TryPublishCnameDcvAsync(productInfo, enrollResult);
                     });
 
+                    EnrollmentResult? newPolled = null;
+                    await flow.StepAsync("PollForIssuance", async () =>
+                    {
+                        newPolled = await TryPollForIssuedCertAsync(enrollResult?.CARequestID);
+                    });
+                    if (newPolled != null)
+                    {
+                        flow.Step("PollResult", "issued during poll window");
+                        Logger.MethodExit(LogLevel.Debug);
+                        return newPolled;
+                    }
+
                     Logger.MethodExit(LogLevel.Debug);
                     return enrollResult;
 
@@ -752,8 +794,14 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
                             Logger.LogTrace("Renewal Response JSON: {Json}", JsonConvert.SerializeObject(renewResponse));
                             var renewResult = _requestManager.GetRenewResponse(renewResponse);
                             flow.Step("MapRenewalResult", $"Status={renewResult?.Status}, Message={renewResult?.StatusMessage ?? "(null)"}");
+
+                            EnrollmentResult? renewPolled = null;
+                            await flow.StepAsync("PollForIssuance", async () =>
+                            {
+                                renewPolled = await TryPollForIssuedCertAsync(renewResult?.CARequestID);
+                            });
                             Logger.MethodExit(LogLevel.Debug);
-                            return renewResult;
+                            return renewPolled ?? renewResult;
                         }
 
                         flow.Fail("MissingEnrollmentParams", "Applicant Last Name not present — one-click renew unavailable");
@@ -825,8 +873,14 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
                         Logger.LogTrace("Reissue Response JSON: {Json}", JsonConvert.SerializeObject(reissueResponse));
                         var reissueResult = _requestManager.GetReIssueResult(reissueResponse);
                         flow.Step("MapReissueResult", $"Status={reissueResult?.Status}, Message={reissueResult?.StatusMessage ?? "(null)"}");
+
+                        EnrollmentResult? reissuePolled = null;
+                        await flow.StepAsync("PollForIssuance", async () =>
+                        {
+                            reissuePolled = await TryPollForIssuedCertAsync(reissueResult?.CARequestID);
+                        });
                         Logger.MethodExit(LogLevel.Debug);
-                        return reissueResult;
+                        return reissuePolled ?? reissueResult;
                     }
 
                     flow.Fail("MissingEnrollmentParams", "Applicant Last Name not present — one-click reissue unavailable");
@@ -985,6 +1039,13 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
                 Hidden = false,
                 DefaultValue = "30",
                 Type = "Number"
+            },
+            [Constants.DcvPollTimeoutSeconds] = new()
+            {
+                Comments = "Max seconds to synchronously poll CSC for issuance after submitting an order (and publishing CNAME DCV). 0 disables polling (enrollment returns pending immediately; cert arrives on next sync). When >0, fast-validating orders can return the cert directly. Keep small to avoid long-blocking enrollment requests.",
+                Hidden = false,
+                DefaultValue = "0",
+                Type = "Number"
             }
         };
     }
@@ -1110,6 +1171,77 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
     {
         if (string.IsNullOrEmpty(s)) return s ?? string.Empty;
         return s.EndsWith('.') ? s[..^1] : s;
+    }
+
+    /// <summary>
+    ///     Synchronously poll CSC for issuance of the order identified by <paramref name="uuid"/>,
+    ///     up to <see cref="DcvPollTimeoutSeconds"/>. Returns a GENERATED <see cref="EnrollmentResult"/>
+    ///     carrying the issued leaf certificate if CSC issues within the window, or null if the
+    ///     window expires (in which case the caller falls back to its pending/EXTERNALVALIDATION result).
+    ///     No-op (returns null) when polling is disabled or the uuid is missing.
+    /// </summary>
+    private async Task<EnrollmentResult?> TryPollForIssuedCertAsync(string? uuid)
+    {
+        if (DcvPollTimeoutSeconds <= 0)
+        {
+            Logger.LogTrace("TryPollForIssuedCertAsync: polling disabled (DcvPollTimeoutSeconds=0), skipping.");
+            return null;
+        }
+
+        if (string.IsNullOrEmpty(uuid))
+        {
+            Logger.LogWarning("TryPollForIssuedCertAsync: no UUID/CARequestID to poll, skipping.");
+            return null;
+        }
+
+        var deadline = DateTime.UtcNow.AddSeconds(DcvPollTimeoutSeconds);
+        Logger.LogInformation("TryPollForIssuedCertAsync: polling CSC for issuance of '{Uuid}' for up to {Seconds}s (interval {Interval}s).",
+            uuid, DcvPollTimeoutSeconds, (int)DcvPollInterval.TotalSeconds);
+
+        var attempt = 0;
+        while (DateTime.UtcNow < deadline)
+        {
+            attempt++;
+            AnyCAPluginCertificate record;
+            try
+            {
+                record = await GetSingleRecord(uuid);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning(ex, "TryPollForIssuedCertAsync: poll attempt {Attempt} for '{Uuid}' threw, will retry. {Error}",
+                    attempt, uuid, ex.Message);
+                record = null;
+            }
+
+            if (record != null)
+            {
+                Logger.LogTrace("TryPollForIssuedCertAsync: attempt {Attempt} for '{Uuid}' — status={Status}, cert={CertState}.",
+                    attempt, uuid, record.Status, string.IsNullOrEmpty(record.Certificate) ? "empty" : "present");
+
+                if (record.Status == (int)EndEntityStatus.GENERATED && !string.IsNullOrEmpty(record.Certificate))
+                {
+                    Logger.LogInformation("TryPollForIssuedCertAsync: '{Uuid}' issued after {Attempt} poll(s); returning cert directly.", uuid, attempt);
+                    return new EnrollmentResult
+                    {
+                        Status = (int)EndEntityStatus.GENERATED,
+                        CARequestID = uuid,
+                        Certificate = record.Certificate,
+                        StatusMessage = $"Certificate issued and retrieved for order {uuid}."
+                    };
+                }
+            }
+
+            // Don't sleep past the deadline.
+            if (DateTime.UtcNow.Add(DcvPollInterval) >= deadline)
+                break;
+
+            await Task.Delay(DcvPollInterval);
+        }
+
+        Logger.LogInformation("TryPollForIssuedCertAsync: '{Uuid}' not issued within {Seconds}s after {Attempts} attempt(s); falling back to pending.",
+            uuid, DcvPollTimeoutSeconds, attempt);
+        return null;
     }
 
     /// <summary>

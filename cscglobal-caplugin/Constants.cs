@@ -15,6 +15,7 @@ public class Constants
     public static string DefaultPageSize = "DefaultPageSize";
     public static string SyncFilterDays = "SyncFilterDays";
     public static string RenewalWindowDays = "RenewalWindowDays";
+    public static string DcvPollTimeoutSeconds = "DcvPollTimeoutSeconds";
 }
     
 public class ProductIDs
