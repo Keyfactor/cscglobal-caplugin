@@ -80,7 +80,7 @@ public class RequestManager
                     cnames.Add(dcv.CName.Name, dcv.CName.Value);
                 }
 
-                if (string.IsNullOrEmpty(dcv.Email))
+                if (!string.IsNullOrEmpty(dcv.Email) && !cnames.ContainsKey(dcv.Email))
                 {
                     cnames.Add(dcv.Email, dcv.Email);
                 }
