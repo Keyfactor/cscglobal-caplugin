@@ -65,6 +65,15 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
 
     private ICscGlobalClient CscGlobalClient { get; set; }
 
+    /// <summary>
+    ///     Whether the CA is enabled. When false, the plugin returns early from Ping,
+    ///     ValidateCAConnectionInfo, ValidateProductInfo, Synchronize, Enroll, and Revoke without
+    ///     calling CSC. Primarily used to allow creation of the CA record prior to configuration
+    ///     information being available (standard field across Keyfactor CA plugins). Defaults to true
+    ///     so existing deployments that don't set this key continue to function.
+    /// </summary>
+    public bool Enabled { get; set; } = true;
+
     public int SyncFilterDays { get; set; }
 
     public int RenewalWindowDays { get; set; }
@@ -96,13 +105,6 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
 
         _certificateDataReader = certificateDataReader;
 
-        flow.Step("CreateCscGlobalClient", () =>
-        {
-            Logger.LogTrace("Creating CscGlobalClient from configProvider...");
-            CscGlobalClient = new CscGlobalClient(configProvider);
-            Logger.LogTrace("CscGlobalClient created successfully.");
-        });
-
         flow.Step("ValidateConnectionData", () =>
         {
             if (configProvider.CAConnectionData == null)
@@ -112,6 +114,41 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
             }
             Logger.LogTrace("CAConnectionData keys: {Keys}", string.Join(", ", configProvider.CAConnectionData.Keys));
         });
+
+        flow.Step("ReadEnabled", () =>
+        {
+            Enabled = true; // default
+            if (configProvider.CAConnectionData.TryGetValue(Constants.Enabled, out var enabledObj))
+            {
+                Logger.LogTrace("Enabled raw value: '{Value}'", enabledObj?.ToString() ?? "(null)");
+                if (bool.TryParse(enabledObj?.ToString(), out var parsed))
+                    Enabled = parsed;
+                else
+                    Logger.LogWarning("Enabled value '{Value}' could not be parsed as bool, defaulting to true.", enabledObj);
+            }
+            else
+            {
+                Logger.LogTrace("Enabled key not found in CAConnectionData, defaulting to true.");
+            }
+            Logger.LogInformation("CA is {State}.", Enabled ? "Enabled" : "Disabled");
+        }, $"Enabled={Enabled}");
+
+        // Construct the CSC client only when enabled. When disabled we allow Initialize to complete
+        // without valid API credentials — this is the whole point of the Enabled toggle (so ops can
+        // create the CA record before credentials are available).
+        if (Enabled)
+        {
+            flow.Step("CreateCscGlobalClient", () =>
+            {
+                Logger.LogTrace("Creating CscGlobalClient from configProvider...");
+                CscGlobalClient = new CscGlobalClient(configProvider);
+                Logger.LogTrace("CscGlobalClient created successfully.");
+            });
+        }
+        else
+        {
+            flow.Skip("CreateCscGlobalClient", "CA is Disabled");
+        }
 
         flow.Step("ReadSyncFilterDays", () =>
         {
@@ -297,6 +334,14 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
         if (blockingBuffer == null)
             throw new ArgumentNullException(nameof(blockingBuffer), "blockingBuffer cannot be null in Synchronize");
 
+        if (!Enabled)
+        {
+            Logger.LogWarning("The CA is currently in the Disabled state. It must be Enabled to perform operations. Skipping Synchronize.");
+            blockingBuffer.CompleteAdding();
+            Logger.MethodExit(LogLevel.Debug);
+            return;
+        }
+
         try
         {
             if (fullSync)
@@ -463,6 +508,12 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
         Logger.LogTrace("Revoke called with caRequestID='{CaRequestId}', hexSerialNumber='{SerialNumber}', revocationReason={Reason}",
             caRequestID ?? "(null)", hexSerialNumber ?? "(null)", revocationReason);
 
+        if (!Enabled)
+        {
+            Logger.LogWarning("The CA is currently in the Disabled state. It must be Enabled to perform operations. Rejecting Revoke.");
+            throw new InvalidOperationException("The CSC Global CA is in the Disabled state. Enable it to perform revocations.");
+        }
+
         flow.Step("ValidateInput", () =>
         {
             if (string.IsNullOrEmpty(caRequestID))
@@ -538,6 +589,17 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
             string.IsNullOrEmpty(csr) ? "empty/null" : $"present ({csr.Length} chars)",
             san?.Count ?? 0,
             productInfo == null ? "NULL" : "present");
+
+        if (!Enabled)
+        {
+            flow.Fail("Disabled", "CA is Disabled");
+            Logger.LogWarning("The CA is currently in the Disabled state. It must be Enabled to perform operations. Rejecting Enroll.");
+            return new EnrollmentResult
+            {
+                Status = (int)EndEntityStatus.FAILED,
+                StatusMessage = "The CSC Global CA is in the Disabled state. Enable it to perform enrollments."
+            };
+        }
 
         flow.Step("ValidateInputs", () =>
         {
@@ -927,7 +989,15 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
     public async Task Ping()
     {
         Logger.MethodEntry();
-        Logger.LogTrace("Ping: CscGlobalClient is {Null}", CscGlobalClient == null ? "NULL" : "present");
+        Logger.LogTrace("Ping: Enabled={Enabled}, CscGlobalClient is {Null}", Enabled, CscGlobalClient == null ? "NULL" : "present");
+
+        if (!Enabled)
+        {
+            Logger.LogWarning("The CA is currently in the Disabled state. It must be Enabled to perform operations. Skipping Ping.");
+            Logger.MethodExit();
+            return;
+        }
+
         try
         {
             Logger.LogInformation("Ping request received");
@@ -955,6 +1025,21 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
             throw new ArgumentNullException(nameof(connectionInfo), "connectionInfo cannot be null.");
         }
 
+        // Honor the Enabled flag from the incoming connectionInfo (which may differ from Initialize's
+        // snapshot when the operator is currently editing the CA). If disabled, skip validation so
+        // the CA can be saved without valid credentials.
+        var incomingEnabled = true;
+        if (connectionInfo.TryGetValue(Constants.Enabled, out var enabledObj) &&
+            bool.TryParse(enabledObj?.ToString(), out var parsed))
+            incomingEnabled = parsed;
+
+        if (!incomingEnabled)
+        {
+            Logger.LogWarning("The CA is currently in the Disabled state. It must be Enabled to perform operations. Skipping ValidateCAConnectionInfo.");
+            Logger.MethodExit(LogLevel.Debug);
+            return;
+        }
+
         Logger.MethodExit(LogLevel.Debug);
     }
 
@@ -971,6 +1056,21 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
         {
             Logger.LogError("ValidateProductInfo: productInfo is null.");
             throw new ArgumentNullException(nameof(productInfo), "productInfo cannot be null.");
+        }
+
+        // Honor the Enabled flag from the incoming connectionInfo. If the CA is disabled, skip
+        // validation so a template can be saved on a disabled CA (pre-configuration workflow).
+        var incomingEnabled = true;
+        if (connectionInfo != null &&
+            connectionInfo.TryGetValue(Constants.Enabled, out var enabledObj) &&
+            bool.TryParse(enabledObj?.ToString(), out var parsed))
+            incomingEnabled = parsed;
+
+        if (!incomingEnabled)
+        {
+            Logger.LogWarning("The CA is currently in the Disabled state. It must be Enabled to perform operations. Skipping ValidateProductInfo.");
+            Logger.MethodExit(LogLevel.Debug);
+            return;
         }
 
         if (string.IsNullOrEmpty(productInfo.ProductID))
@@ -998,6 +1098,13 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
     {
         return new Dictionary<string, PropertyConfigInfo>
         {
+            [Constants.Enabled] = new()
+            {
+                Comments = "Flag to Enable or Disable gateway functionality. Disabling is primarily used to allow creation of the CA prior to configuration information being available.",
+                Hidden = false,
+                DefaultValue = true,
+                Type = "Boolean"
+            },
             [Constants.CscGlobalUrl] = new()
             {
                 Comments = "CSCGlobal API URL",
