@@ -315,6 +315,7 @@ When defining the Certificate Authority in the AnyCA Gateway REST portal, config
 
 CONFIG ELEMENT | DESCRIPTION | DEFAULT
 ---------------|-------------|--------
+Enabled | Flag to Enable or Disable gateway functionality. Set to `false` to allow creating the CA record before configuration information is available; the plugin then short-circuits Ping, Sync, Enroll, and Revoke with a warning until it is re-enabled. | `true`
 CscGlobalUrl | The base URL for the CSCGlobal API (e.g. `https://apis.cscglobal.com`) | (required)
 ApiKey | Your CSCGlobal API key | (required)
 BearerToken | Your CSCGlobal Bearer token for authentication | (required)
