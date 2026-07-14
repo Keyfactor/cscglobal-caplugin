@@ -3,7 +3,7 @@
 
 	<PropertyGroup>
 		<AppendTargetFrameworkToOutputPath>true</AppendTargetFrameworkToOutputPath>
-		<TargetFrameworks>net6.0;net8.0;net10.0</TargetFrameworks>
+		<TargetFrameworks>net10.0</TargetFrameworks>
 		<RootNamespace>Keyfactor.Extensions.CAPlugin.CSCGlobal</RootNamespace>
 		<CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
 		<ImplicitUsings>enable</ImplicitUsings>
