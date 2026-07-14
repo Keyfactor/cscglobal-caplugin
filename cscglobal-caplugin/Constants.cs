@@ -13,8 +13,9 @@ public class Constants
     public static string CscGlobalApiKey = "ApiKey";
     public static string BearerToken = "BearerToken";
     public static string DefaultPageSize = "DefaultPageSize";
-    public static string TemplateSync = "TemplateSync";
     public static string SyncFilterDays = "SyncFilterDays";
+    public static string RenewalWindowDays = "RenewalWindowDays";
+    public static string DcvPollTimeoutSeconds = "DcvPollTimeoutSeconds";
 }
     
 public class ProductIDs
@@ -26,8 +27,8 @@ public class ProductIDs
         "CSC TrustedSecure UC Certificate",
         "CSC TrustedSecure Premium Wildcard Certificate",
         "CSC TrustedSecure Domain Validated SSL",
-        "CSC TrustedSecure Domain Validated Wildcard SSL",
-        "CSC TrustedSecure Domain Validated UC Certificate"
+        "CSC Trusted Secure Domain Validated Wildcard SSL",
+        "CSC Trusted Secure Domain Validated UC Certificate"
     };
 }
 
