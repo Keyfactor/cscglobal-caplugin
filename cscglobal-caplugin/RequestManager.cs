@@ -179,7 +179,7 @@ public class RequestManager
                     }
                 }
 
-                if (!string.IsNullOrEmpty(dcv.Email))
+                if (!string.IsNullOrEmpty(dcv.Email) && !cnames.ContainsKey(dcv.Email))
                 {
                     if (!cnames.ContainsKey(dcv.Email))
                     {
