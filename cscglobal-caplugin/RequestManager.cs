@@ -267,9 +267,14 @@ public class RequestManager
             var domainName = v;
             var san = new SubjectAlternativeName();
             san.DomainName = domainName;
-            var emailAddresses = productInfo.ProductParameters["Addtl Sans Comma Separated DVC Emails"].Split(',');
             if (methodType.ToUpper() == "EMAIL")
+            {
+                productInfo.ProductParameters.TryGetValue("Addtl Sans Comma Separated DVC Emails", out var addtlSansEmails);
+                var emailAddresses = string.IsNullOrWhiteSpace(addtlSansEmails)
+                    ? Array.Empty<string>()
+                    : addtlSansEmails.Split(',');
                 san.DomainControlValidation = GetDomainControlValidation(methodType, emailAddresses, domainName);
+            }
             else //it is a CNAME validation so no email is needed
                 san.DomainControlValidation = GetDomainControlValidation(methodType, "");
 
