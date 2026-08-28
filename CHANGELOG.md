@@ -1,5 +1,6 @@
 v1.1.3
 - Fixed KeyNotFoundException during enrollment when the optional "Addtl Sans Comma Separated DVC Emails" field was not set
+- Fixed KeyNotFoundException during enrollment when no SANs were supplied for a UC certificate
 
 v1.1.2
 - Fixed NullReferenceException in GetEnrollmentResult when CSC returned a DCV email of null (typical for EMAIL DCV orders with actionNeeded=N, and for CNAME-only DCV)
