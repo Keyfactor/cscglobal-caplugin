@@ -1,3 +1,9 @@
+v1.1.3
+- Fixed KeyNotFoundException during enrollment when the optional "Addtl Sans Comma Separated DVC Emails" field was not set
+
+v1.1.2
+- Fixed NullReferenceException in GetEnrollmentResult when CSC returned a DCV email of null (typical for EMAIL DCV orders with actionNeeded=N, and for CNAME-only DCV)
+
 v.1.1.1
 - Added Incremental Sync that goes back X Number of days
 - Fixed issue with parsing certain certificates that were in zip format
