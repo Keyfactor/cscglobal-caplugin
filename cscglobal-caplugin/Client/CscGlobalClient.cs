@@ -65,7 +65,11 @@ public sealed class CscGlobalClient : ICscGlobalClient
             }
 
             if (!resp.IsSuccessStatusCode)
-                Logger.LogError($"Registration request failed with status code {resp.StatusCode}");
+            {
+                var errorBody = await resp.Content.ReadAsStringAsync();
+                Logger.LogError($"Registration request failed with status code {resp.StatusCode} | Message: {errorBody}");
+                throw new HttpRequestException($"Registration request failed with status code {resp.StatusCode}: {errorBody}");
+            }
 
             var registrationResponse =
                 JsonConvert.DeserializeObject<RegistrationResponse>(await resp.Content.ReadAsStringAsync(),
@@ -100,7 +104,11 @@ public sealed class CscGlobalClient : ICscGlobalClient
             }
 
             if (!resp.IsSuccessStatusCode)
-                Logger.LogError($"Renewal request failed with status code {resp.StatusCode}");
+            {
+                var errorBody = await resp.Content.ReadAsStringAsync();
+                Logger.LogError($"Renewal request failed with status code {resp.StatusCode} | Message: {errorBody}");
+                throw new HttpRequestException($"Renewal request failed with status code {resp.StatusCode}: {errorBody}");
+            }
 
             var rawRenewResponse = await resp.Content.ReadAsStringAsync();
             Logger.LogTrace("Logging Success Response Raw");
@@ -133,7 +141,11 @@ public sealed class CscGlobalClient : ICscGlobalClient
             }
 
             if (!resp.IsSuccessStatusCode)
-                Logger.LogError($"Reissue request failed with status code {resp.StatusCode}");
+            {
+                var errorBody = await resp.Content.ReadAsStringAsync();
+                Logger.LogError($"Reissue request failed with status code {resp.StatusCode} | Message: {errorBody}");
+                throw new HttpRequestException($"Reissue request failed with status code {resp.StatusCode}: {errorBody}");
+            }
 
             var reissueResponse =
                 JsonConvert.DeserializeObject<ReissueResponse>(await resp.Content.ReadAsStringAsync());
@@ -201,7 +213,11 @@ public sealed class CscGlobalClient : ICscGlobalClient
             }
 
             if (!resp.IsSuccessStatusCode)
-                Logger.LogError($"Revoke request for UUID {uuId} failed with status code {resp.StatusCode}");
+            {
+                var errorBody = await resp.Content.ReadAsStringAsync();
+                Logger.LogError($"Revoke request for UUID {uuId} failed with status code {resp.StatusCode} | Message: {errorBody}");
+                throw new HttpRequestException($"Revoke request failed with status code {resp.StatusCode}: {errorBody}");
+            }
 
             var getRevokeResponse =
                 JsonConvert.DeserializeObject<RevokeResponse>(await resp.Content.ReadAsStringAsync());
