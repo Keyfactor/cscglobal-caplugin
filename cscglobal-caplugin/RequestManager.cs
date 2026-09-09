@@ -10,12 +10,16 @@ using System.Text;
 using Keyfactor.AnyGateway.Extensions;
 using Keyfactor.Extensions.CAPlugin.CSCGlobal.Client.Models;
 using Keyfactor.Extensions.CAPlugin.CSCGlobal.Interfaces;
+using Keyfactor.Logging;
 using Keyfactor.PKI.Enums.EJBCA;
+using Microsoft.Extensions.Logging;
 
 namespace Keyfactor.Extensions.CAPlugin.CSCGlobal;
 
 public class RequestManager
 {
+    private readonly ILogger Logger = LogHandler.GetClassLogger<RequestManager>();
+
     public static Func<string, string> Pemify = ss =>
         ss.Length <= 64 ? ss : ss.Substring(0, 64) + "\n" + Pemify(ss.Substring(64));
 
@@ -34,23 +38,29 @@ public class RequestManager
             }
             else if (field.Mandatory)
             {
+                Logger.LogError($"Custom field {field.Label} is marked as mandatory, but was not supplied in the request.");
                 throw new Exception(
                     $"Custom field {field.Label} is marked as mandatory, but was not supplied in the request.");
             }
 
+        Logger.LogTrace($"Mapped {customFieldList.Count} custom field(s) for request");
         return customFieldList;
     }
 
     public EnrollmentResult GetRenewResponse(RenewalResponse renewResponse)
     {
         if (renewResponse.RegistrationError != null)
+        {
+            Logger.LogError($"Renewal failed: {renewResponse.RegistrationError.Description}");
             return new EnrollmentResult
             {
                 Status = (int)EndEntityStatus.FAILED, //failure
                 CARequestID = renewResponse?.Result?.Status?.Uuid,
                 StatusMessage = renewResponse.RegistrationError.Description
             };
+        }
 
+        Logger.LogInformation($"Renewal successfully completed for {renewResponse.Result.CommonName}");
         return new EnrollmentResult
         {
             Status = (int)EndEntityStatus.GENERATED, //success
@@ -65,11 +75,14 @@ public class RequestManager
             IRegistrationResponse registrationResponse)
     {
         if (registrationResponse.RegistrationError != null)
+        {
+            Logger.LogError($"Enrollment failed: {registrationResponse.RegistrationError.Description}");
             return new EnrollmentResult
             {
                 Status = (int)EndEntityStatus.FAILED, //failure
                 StatusMessage = registrationResponse.RegistrationError.Description
             };
+        }
 
         var cnames = new Dictionary<string, string>();
         if (registrationResponse.Result.DcvDetails != null && registrationResponse.Result.DcvDetails.Count > 0)
@@ -86,6 +99,7 @@ public class RequestManager
                 }
             }
         
+        Logger.LogInformation($"Order successfully created with order number {registrationResponse.Result.CommonName}");
         return new EnrollmentResult
         {
             Status = (int)EndEntityStatus.EXTERNALVALIDATION, //success
@@ -99,7 +113,10 @@ public class RequestManager
     public int GetRevokeResult(IRevokeResponse revokeResponse)
     {
         if (revokeResponse.RegistrationError != null)
+        {
+            Logger.LogError($"Revoke failed: {revokeResponse.RegistrationError.Description}");
             return (int)EndEntityStatus.FAILED;
+        }
 
         return (int)EndEntityStatus.REVOKED;
     }
@@ -107,12 +124,16 @@ public class RequestManager
     public EnrollmentResult GetReIssueResult(IReissueResponse reissueResponse)
     {
         if (reissueResponse.RegistrationError != null)
+        {
+            Logger.LogError($"Reissue failed: {reissueResponse.RegistrationError.Description}");
             return new EnrollmentResult
             {
                 Status = (int)EndEntityStatus.FAILED, //failure
                 StatusMessage = reissueResponse.RegistrationError.Description
             };
+        }
 
+        Logger.LogInformation($"Reissue successfully completed for {reissueResponse.Result.CommonName}");
         return new EnrollmentResult
         {
             Status = (int)EndEntityStatus.GENERATED, //success
@@ -135,6 +156,7 @@ public class RequestManager
                 };
         }
 
+        Logger.LogWarning($"No matching DCV email address found for domain {domainName}");
         return null;
     }
 
@@ -150,6 +172,7 @@ public class RequestManager
     public RegistrationRequest GetRegistrationRequest(EnrollmentProductInfo productInfo, string csr,
         Dictionary<string, string[]> sans, List<GetCustomField> customFields)
     {
+        Logger.LogTrace($"Building registration request for product {productInfo.ProductID}");
         //var cert = "-----BEGIN CERTIFICATE REQUEST-----\r\n";
         var cert = Pemify(csr);
         //cert = cert + "\r\n-----END CERTIFICATE REQUEST-----";
@@ -177,8 +200,8 @@ public class RequestManager
             BusinessUnit = productInfo.ProductParameters["Business Unit"],
             ShowPrice = true, //User should not have to fill this out
             CustomFields = GetCustomFields(productInfo, customFields),
-            SubjectAlternativeNames = certificateType == "2" ? GetSubjectAlternativeNames(productInfo, sans) : null,
-            EvCertificateDetails = certificateType == "3" ? GetEvCertificateDetails(productInfo) : null
+            SubjectAlternativeNames = MultiNameCertificateTypes.Contains(certificateType) ? GetSubjectAlternativeNames(productInfo, sans) : null,
+            EvCertificateDetails = EvCertificateTypes.Contains(certificateType) ? GetEvCertificateDetails(productInfo) : null
         };
     }
 
@@ -206,10 +229,20 @@ public class RequestManager
                 return "5";
             case "CSC TrustedSecure Domain Validated UC Certificate":
                 return "6";
+            case "CSC TrustedSecure EV, Multiple Names":
+                return "7";
+            case "CSC TrustedSecure OV Wildcard, Multiple Names":
+                return "8";
+            case "CSC TrustedSecure DV Wildcard, Multiple Names":
+                return "9";
         }
 
+        Logger.LogWarning($"Unrecognized product ID '{productId}'; defaulting certificate type to -1");
         return "-1";
     }
+
+    private static readonly HashSet<string> MultiNameCertificateTypes = new() { "2", "7", "8", "9" };
+    private static readonly HashSet<string> EvCertificateTypes = new() { "3", "7" };
 
     public Notifications GetNotifications(EnrollmentProductInfo productInfo)
     {
@@ -224,6 +257,7 @@ public class RequestManager
     public RenewalRequest GetRenewalRequest(EnrollmentProductInfo productInfo, string uUId, string csr,
         Dictionary<string, string[]> sans, List<GetCustomField> customFields)
     {
+        Logger.LogTrace($"Building renewal request for product {productInfo.ProductID}, UUID {uUId}");
         //var cert = "-----BEGIN CERTIFICATE REQUEST-----\r\n";
         var cert = Pemify(csr);
         //cert = cert + "\r\n-----END CERTIFICATE REQUEST-----";
@@ -250,9 +284,9 @@ public class RequestManager
             OrganizationContact = productInfo.ProductParameters["Organization Contact"],
             BusinessUnit = productInfo.ProductParameters["Business Unit"],
             ShowPrice = true,
-            SubjectAlternativeNames = certificateType == "2" ? GetSubjectAlternativeNames(productInfo, sans) : null,
+            SubjectAlternativeNames = MultiNameCertificateTypes.Contains(certificateType) ? GetSubjectAlternativeNames(productInfo, sans) : null,
             CustomFields = GetCustomFields(productInfo, customFields),
-            EvCertificateDetails = certificateType == "3" ? GetEvCertificateDetails(productInfo) : null
+            EvCertificateDetails = EvCertificateTypes.Contains(certificateType) ? GetEvCertificateDetails(productInfo) : null
         };
     }
 
@@ -262,14 +296,20 @@ public class RequestManager
         var subjectNameList = new List<SubjectAlternativeName>();
         var methodType = productInfo.ProductParameters["Domain Control Validation Method"];
 
-        foreach (var v in sans["dnsname"])
+        sans.TryGetValue("dnsname", out var dnsNames);
+        foreach (var v in dnsNames ?? Array.Empty<string>())
         {
             var domainName = v;
             var san = new SubjectAlternativeName();
             san.DomainName = domainName;
-            var emailAddresses = productInfo.ProductParameters["Addtl Sans Comma Separated DVC Emails"].Split(',');
             if (methodType.ToUpper() == "EMAIL")
+            {
+                productInfo.ProductParameters.TryGetValue("Addtl Sans Comma Separated DVC Emails", out var addtlSansEmails);
+                var emailAddresses = string.IsNullOrWhiteSpace(addtlSansEmails)
+                    ? Array.Empty<string>()
+                    : addtlSansEmails.Split(',');
                 san.DomainControlValidation = GetDomainControlValidation(methodType, emailAddresses, domainName);
+            }
             else //it is a CNAME validation so no email is needed
                 san.DomainControlValidation = GetDomainControlValidation(methodType, "");
 
@@ -282,6 +322,7 @@ public class RequestManager
     public ReissueRequest GetReissueRequest(EnrollmentProductInfo productInfo, string uUId, string csr,
         Dictionary<string, string[]> sans, List<GetCustomField> customFields)
     {
+        Logger.LogTrace($"Building reissue request for product {productInfo.ProductID}, UUID {uUId}");
         //var cert = "-----BEGIN CERTIFICATE REQUEST-----\r\n";
         var cert = Pemify(csr);
         //cert = cert + "\r\n-----END CERTIFICATE REQUEST-----";
@@ -308,9 +349,9 @@ public class RequestManager
             OrganizationContact = productInfo.ProductParameters["Organization Contact"],
             BusinessUnit = productInfo.ProductParameters["Business Unit"],
             ShowPrice = true,
-            SubjectAlternativeNames = certificateType == "2" ? GetSubjectAlternativeNames(productInfo, sans) : null,
+            SubjectAlternativeNames = MultiNameCertificateTypes.Contains(certificateType) ? GetSubjectAlternativeNames(productInfo, sans) : null,
             CustomFields = GetCustomFields(productInfo, customFields),
-            EvCertificateDetails = certificateType == "3" ? GetEvCertificateDetails(productInfo) : null
+            EvCertificateDetails = EvCertificateTypes.Contains(certificateType) ? GetEvCertificateDetails(productInfo) : null
         };
     }
 
@@ -340,6 +381,7 @@ public class RequestManager
                 returnStatus = (int)EndEntityStatus.REVOKED;
                 break;
             default:
+                Logger.LogWarning($"Unrecognized CSC Global status '{cscGlobalStatus}'; mapping to FAILED");
                 returnStatus = (int)EndEntityStatus.FAILED;
                 break;
         }
