@@ -23,9 +23,23 @@ public class RequestManager
     public static Func<string, string> Pemify = ss =>
         ss.Length <= 64 ? ss : ss.Substring(0, 64) + "\n" + Pemify(ss.Substring(64));
 
+    private static string GetOptionalParam(EnrollmentProductInfo productInfo, string key)
+    {
+        return productInfo.ProductParameters != null &&
+               productInfo.ProductParameters.TryGetValue(key, out var value)
+            ? value
+            : string.Empty;
+    }
+
     private List<CustomField> GetCustomFields(EnrollmentProductInfo productInfo, List<GetCustomField> customFields)
     {
         var customFieldList = new List<CustomField>();
+        if (customFields == null)
+        {
+            Logger.LogTrace("No custom field definitions supplied; skipping custom field mapping");
+            return customFieldList;
+        }
+
         foreach (var field in customFields)
             if (productInfo.ProductParameters.ContainsKey(field.Label))
             {
@@ -49,14 +63,34 @@ public class RequestManager
 
     public EnrollmentResult GetRenewResponse(RenewalResponse renewResponse)
     {
+        if (renewResponse == null)
+        {
+            Logger.LogError("Renewal failed: CSC Global returned no response");
+            return new EnrollmentResult
+            {
+                Status = (int)EndEntityStatus.FAILED, //failure
+                StatusMessage = "CSC Global returned no response for the renewal request"
+            };
+        }
+
         if (renewResponse.RegistrationError != null)
         {
             Logger.LogError($"Renewal failed: {renewResponse.RegistrationError.Description}");
             return new EnrollmentResult
             {
                 Status = (int)EndEntityStatus.FAILED, //failure
-                CARequestID = renewResponse?.Result?.Status?.Uuid,
+                CARequestID = renewResponse.Result?.Status?.Uuid,
                 StatusMessage = renewResponse.RegistrationError.Description
+            };
+        }
+
+        if (renewResponse.Result == null)
+        {
+            Logger.LogError("Renewal failed: CSC Global reported success but returned no result");
+            return new EnrollmentResult
+            {
+                Status = (int)EndEntityStatus.FAILED, //failure
+                StatusMessage = "CSC Global reported success but returned no result"
             };
         }
 
@@ -74,6 +108,16 @@ public class RequestManager
         GetEnrollmentResult(
             IRegistrationResponse registrationResponse)
     {
+        if (registrationResponse == null)
+        {
+            Logger.LogError("Enrollment failed: CSC Global returned no response");
+            return new EnrollmentResult
+            {
+                Status = (int)EndEntityStatus.FAILED, //failure
+                StatusMessage = "CSC Global returned no response for the registration request"
+            };
+        }
+
         if (registrationResponse.RegistrationError != null)
         {
             Logger.LogError($"Enrollment failed: {registrationResponse.RegistrationError.Description}");
@@ -81,6 +125,16 @@ public class RequestManager
             {
                 Status = (int)EndEntityStatus.FAILED, //failure
                 StatusMessage = registrationResponse.RegistrationError.Description
+            };
+        }
+
+        if (registrationResponse.Result == null)
+        {
+            Logger.LogError("Enrollment failed: CSC Global reported success but returned no result");
+            return new EnrollmentResult
+            {
+                Status = (int)EndEntityStatus.FAILED, //failure
+                StatusMessage = "CSC Global reported success but returned no result"
             };
         }
 
@@ -103,7 +157,7 @@ public class RequestManager
         return new EnrollmentResult
         {
             Status = (int)EndEntityStatus.EXTERNALVALIDATION, //success
-            CARequestID = registrationResponse.Result.Status.Uuid,
+            CARequestID = registrationResponse.Result.Status?.Uuid,
             StatusMessage =
                 $"Order Successfully Created With Order Number {registrationResponse.Result.CommonName}",
             EnrollmentContext = cnames.Count > 0 ? cnames : null
@@ -112,6 +166,12 @@ public class RequestManager
 
     public int GetRevokeResult(IRevokeResponse revokeResponse)
     {
+        if (revokeResponse == null)
+        {
+            Logger.LogError("Revoke failed: CSC Global returned no response");
+            return (int)EndEntityStatus.FAILED;
+        }
+
         if (revokeResponse.RegistrationError != null)
         {
             Logger.LogError($"Revoke failed: {revokeResponse.RegistrationError.Description}");
@@ -123,6 +183,16 @@ public class RequestManager
 
     public EnrollmentResult GetReIssueResult(IReissueResponse reissueResponse)
     {
+        if (reissueResponse == null)
+        {
+            Logger.LogError("Reissue failed: CSC Global returned no response");
+            return new EnrollmentResult
+            {
+                Status = (int)EndEntityStatus.FAILED, //failure
+                StatusMessage = "CSC Global returned no response for the reissue request"
+            };
+        }
+
         if (reissueResponse.RegistrationError != null)
         {
             Logger.LogError($"Reissue failed: {reissueResponse.RegistrationError.Description}");
@@ -133,11 +203,21 @@ public class RequestManager
             };
         }
 
+        if (reissueResponse.Result == null)
+        {
+            Logger.LogError("Reissue failed: CSC Global reported success but returned no result");
+            return new EnrollmentResult
+            {
+                Status = (int)EndEntityStatus.FAILED, //failure
+                StatusMessage = "CSC Global reported success but returned no result"
+            };
+        }
+
         Logger.LogInformation($"Reissue successfully completed for {reissueResponse.Result.CommonName}");
         return new EnrollmentResult
         {
             Status = (int)EndEntityStatus.GENERATED, //success
-            CARequestID = reissueResponse.Result.Status.Uuid,
+            CARequestID = reissueResponse.Result.Status?.Uuid,
             StatusMessage = $"Reissue Successfully Completed For {reissueResponse.Result.CommonName}"
         };
     }
@@ -145,10 +225,29 @@ public class RequestManager
     public DomainControlValidation GetDomainControlValidation(string methodType, string[] emailAddress,
         string domainName)
     {
-        foreach (var address in emailAddress)
+        if (string.IsNullOrWhiteSpace(domainName))
         {
-            var email = new MailAddress(address);
-            if (domainName.Contains(email.Host.Split('.')[0]))
+            Logger.LogWarning("GetDomainControlValidation called with an empty domain name");
+            return null;
+        }
+
+        foreach (var address in emailAddress ?? Array.Empty<string>())
+        {
+            if (string.IsNullOrWhiteSpace(address)) continue;
+
+            MailAddress email;
+            try
+            {
+                email = new MailAddress(address.Trim());
+            }
+            catch (FormatException fex)
+            {
+                Logger.LogWarning(fex, $"Skipping malformed DCV email address '{address}'");
+                continue;
+            }
+
+            var hostLabels = email.Host.Split('.');
+            if (hostLabels.Length > 0 && domainName.Contains(hostLabels[0]))
                 return new DomainControlValidation
                 {
                     MethodType = methodType,
@@ -180,8 +279,8 @@ public class RequestManager
 
         var bytes = Encoding.UTF8.GetBytes(cert);
         var encodedString = Convert.ToBase64String(bytes);
-        var commonNameValidationEmail = productInfo.ProductParameters["CN DCV Email"];
-        var methodType = productInfo.ProductParameters["Domain Control Validation Method"];
+        var commonNameValidationEmail = GetOptionalParam(productInfo, "CN DCV Email");
+        var methodType = GetOptionalParam(productInfo, "Domain Control Validation Method");
         var certificateType = GetCertificateType(productInfo.ProductID);
 
         return new RegistrationRequest
@@ -189,15 +288,15 @@ public class RequestManager
             Csr = encodedString,
             ServerSoftware = "-1", //Just default to other, user does not need to fill this in
             CertificateType = certificateType,
-            Term = productInfo.ProductParameters["Term"],
-            ApplicantFirstName = productInfo.ProductParameters["Applicant First Name"],
-            ApplicantLastName = productInfo.ProductParameters["Applicant Last Name"],
-            ApplicantEmailAddress = productInfo.ProductParameters["Applicant Email Address"],
-            ApplicantPhoneNumber = productInfo.ProductParameters["Applicant Phone"],
+            Term = GetOptionalParam(productInfo, "Term"),
+            ApplicantFirstName = GetOptionalParam(productInfo, "Applicant First Name"),
+            ApplicantLastName = GetOptionalParam(productInfo, "Applicant Last Name"),
+            ApplicantEmailAddress = GetOptionalParam(productInfo, "Applicant Email Address"),
+            ApplicantPhoneNumber = GetOptionalParam(productInfo, "Applicant Phone"),
             DomainControlValidation = GetDomainControlValidation(methodType, commonNameValidationEmail),
             Notifications = GetNotifications(productInfo),
-            OrganizationContact = productInfo.ProductParameters["Organization Contact"],
-            BusinessUnit = productInfo.ProductParameters["Business Unit"],
+            OrganizationContact = GetOptionalParam(productInfo, "Organization Contact"),
+            BusinessUnit = GetOptionalParam(productInfo, "Business Unit"),
             ShowPrice = true, //User should not have to fill this out
             CustomFields = GetCustomFields(productInfo, customFields),
             SubjectAlternativeNames = MultiNameCertificateTypes.Contains(certificateType) ? GetSubjectAlternativeNames(productInfo, sans) : null,
@@ -246,11 +345,13 @@ public class RequestManager
 
     public Notifications GetNotifications(EnrollmentProductInfo productInfo)
     {
+        var notificationEmails = GetOptionalParam(productInfo, "Notification Email(s) Comma Separated");
         return new Notifications
         {
             Enabled = true,
-            AdditionalNotificationEmails = productInfo.ProductParameters["Notification Email(s) Comma Separated"]
-                .Split(',').ToList()
+            AdditionalNotificationEmails = string.IsNullOrWhiteSpace(notificationEmails)
+                ? new List<string>()
+                : notificationEmails.Split(',').ToList()
         };
     }
 
@@ -264,8 +365,8 @@ public class RequestManager
 
         var bytes = Encoding.UTF8.GetBytes(cert);
         var encodedString = Convert.ToBase64String(bytes);
-        var commonNameValidationEmail = productInfo.ProductParameters["CN DCV Email"];
-        var methodType = productInfo.ProductParameters["Domain Control Validation Method"];
+        var commonNameValidationEmail = GetOptionalParam(productInfo, "CN DCV Email");
+        var methodType = GetOptionalParam(productInfo, "Domain Control Validation Method");
         var certificateType = GetCertificateType(productInfo.ProductID);
 
         return new RenewalRequest
@@ -274,15 +375,15 @@ public class RequestManager
             Csr = encodedString,
             ServerSoftware = "-1",
             CertificateType = certificateType,
-            Term = productInfo.ProductParameters["Term"],
-            ApplicantFirstName = productInfo.ProductParameters["Applicant First Name"],
-            ApplicantLastName = productInfo.ProductParameters["Applicant Last Name"],
-            ApplicantEmailAddress = productInfo.ProductParameters["Applicant Email Address"],
-            ApplicantPhoneNumber = productInfo.ProductParameters["Applicant Phone"],
+            Term = GetOptionalParam(productInfo, "Term"),
+            ApplicantFirstName = GetOptionalParam(productInfo, "Applicant First Name"),
+            ApplicantLastName = GetOptionalParam(productInfo, "Applicant Last Name"),
+            ApplicantEmailAddress = GetOptionalParam(productInfo, "Applicant Email Address"),
+            ApplicantPhoneNumber = GetOptionalParam(productInfo, "Applicant Phone"),
             DomainControlValidation = GetDomainControlValidation(methodType, commonNameValidationEmail),
             Notifications = GetNotifications(productInfo),
-            OrganizationContact = productInfo.ProductParameters["Organization Contact"],
-            BusinessUnit = productInfo.ProductParameters["Business Unit"],
+            OrganizationContact = GetOptionalParam(productInfo, "Organization Contact"),
+            BusinessUnit = GetOptionalParam(productInfo, "Business Unit"),
             ShowPrice = true,
             SubjectAlternativeNames = MultiNameCertificateTypes.Contains(certificateType) ? GetSubjectAlternativeNames(productInfo, sans) : null,
             CustomFields = GetCustomFields(productInfo, customFields),
@@ -294,9 +395,10 @@ public class RequestManager
         Dictionary<string, string[]> sans)
     {
         var subjectNameList = new List<SubjectAlternativeName>();
-        var methodType = productInfo.ProductParameters["Domain Control Validation Method"];
+        var methodType = GetOptionalParam(productInfo, "Domain Control Validation Method");
 
-        sans.TryGetValue("dnsname", out var dnsNames);
+        string[] dnsNames = null;
+        sans?.TryGetValue("dnsname", out dnsNames);
         foreach (var v in dnsNames ?? Array.Empty<string>())
         {
             var domainName = v;
@@ -329,8 +431,8 @@ public class RequestManager
 
         var bytes = Encoding.UTF8.GetBytes(cert);
         var encodedString = Convert.ToBase64String(bytes);
-        var commonNameValidationEmail = productInfo.ProductParameters["CN DCV Email"];
-        var methodType = productInfo.ProductParameters["Domain Control Validation Method"];
+        var commonNameValidationEmail = GetOptionalParam(productInfo, "CN DCV Email");
+        var methodType = GetOptionalParam(productInfo, "Domain Control Validation Method");
         var certificateType = GetCertificateType(productInfo.ProductID);
 
         return new ReissueRequest
@@ -338,16 +440,16 @@ public class RequestManager
             Uuid = uUId,
             Csr = encodedString,
             ServerSoftware = "-1",
-            CertificateType = GetCertificateType(productInfo.ProductID),
-            Term = productInfo.ProductParameters["Term"],
-            ApplicantFirstName = productInfo.ProductParameters["Applicant First Name"],
-            ApplicantLastName = productInfo.ProductParameters["Applicant Last Name"],
-            ApplicantEmailAddress = productInfo.ProductParameters["Applicant Email Address"],
-            ApplicantPhoneNumber = productInfo.ProductParameters["Applicant Phone"],
+            CertificateType = certificateType,
+            Term = GetOptionalParam(productInfo, "Term"),
+            ApplicantFirstName = GetOptionalParam(productInfo, "Applicant First Name"),
+            ApplicantLastName = GetOptionalParam(productInfo, "Applicant Last Name"),
+            ApplicantEmailAddress = GetOptionalParam(productInfo, "Applicant Email Address"),
+            ApplicantPhoneNumber = GetOptionalParam(productInfo, "Applicant Phone"),
             DomainControlValidation = GetDomainControlValidation(methodType, commonNameValidationEmail),
             Notifications = GetNotifications(productInfo),
-            OrganizationContact = productInfo.ProductParameters["Organization Contact"],
-            BusinessUnit = productInfo.ProductParameters["Business Unit"],
+            OrganizationContact = GetOptionalParam(productInfo, "Organization Contact"),
+            BusinessUnit = GetOptionalParam(productInfo, "Business Unit"),
             ShowPrice = true,
             SubjectAlternativeNames = MultiNameCertificateTypes.Contains(certificateType) ? GetSubjectAlternativeNames(productInfo, sans) : null,
             CustomFields = GetCustomFields(productInfo, customFields),
@@ -358,7 +460,7 @@ public class RequestManager
     private EvCertificateDetails GetEvCertificateDetails(EnrollmentProductInfo productInfo)
     {
         var evDetails = new EvCertificateDetails();
-        evDetails.Country = productInfo.ProductParameters["Organization Country"];
+        evDetails.Country = GetOptionalParam(productInfo, "Organization Country");
         return evDetails;
     }
 

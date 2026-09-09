@@ -24,6 +24,13 @@ public sealed class CscGlobalClient : ICscGlobalClient
     public CscGlobalClient(IAnyCAPluginConfigProvider config)
     {
         Logger = LogHandler.GetClassLogger<CscGlobalClient>();
+        if (config == null) throw new ArgumentNullException(nameof(config));
+        if (config.CAConnectionData == null)
+        {
+            Logger.LogError("CA connection data is null; client will not be able to call the CSC Global API");
+            return;
+        }
+
         if (config.CAConnectionData.ContainsKey(Constants.CscGlobalApiKey))
         {
             BaseUrl = new Uri(config.CAConnectionData[Constants.CscGlobalUrl].ToString());
@@ -74,6 +81,9 @@ public sealed class CscGlobalClient : ICscGlobalClient
             var registrationResponse =
                 JsonConvert.DeserializeObject<RegistrationResponse>(await resp.Content.ReadAsStringAsync(),
                     settings);
+            if (registrationResponse == null)
+                throw new InvalidOperationException("Registration request succeeded but the response body could not be parsed");
+
             Logger.MethodExit(LogLevel.Debug);
             return registrationResponse;
         }
@@ -115,6 +125,9 @@ public sealed class CscGlobalClient : ICscGlobalClient
             Logger.LogTrace(rawRenewResponse);
             var renewalResponse =
                 JsonConvert.DeserializeObject<RenewalResponse>(rawRenewResponse);
+            if (renewalResponse == null)
+                throw new InvalidOperationException("Renewal request succeeded but the response body could not be parsed");
+
             return renewalResponse;
         }
     }
@@ -149,6 +162,9 @@ public sealed class CscGlobalClient : ICscGlobalClient
 
             var reissueResponse =
                 JsonConvert.DeserializeObject<ReissueResponse>(await resp.Content.ReadAsStringAsync());
+            if (reissueResponse == null)
+                throw new InvalidOperationException("Reissue request succeeded but the response body could not be parsed");
+
             return reissueResponse;
         }
     }
@@ -168,6 +184,9 @@ public sealed class CscGlobalClient : ICscGlobalClient
             resp.EnsureSuccessStatusCode();
             var getCertificateResponse =
                 JsonConvert.DeserializeObject<CertificateResponse>(await resp.Content.ReadAsStringAsync());
+            if (getCertificateResponse == null)
+                throw new InvalidOperationException($"Get certificate request for {certificateId} succeeded but the response body could not be parsed");
+
             Logger.MethodExit(LogLevel.Debug);
             return getCertificateResponse;
         }
@@ -187,9 +206,12 @@ public sealed class CscGlobalClient : ICscGlobalClient
             resp.EnsureSuccessStatusCode();
             var getCustomFieldsResponse =
                 JsonConvert.DeserializeObject<GetCustomFields>(await resp.Content.ReadAsStringAsync());
+            if (getCustomFieldsResponse == null)
+                throw new InvalidOperationException("Get custom fields request succeeded but the response body could not be parsed");
+
             Logger.LogTrace($"Retrieved {getCustomFieldsResponse.CustomFields?.Count ?? 0} custom field(s)");
             Logger.MethodExit(LogLevel.Debug);
-            return getCustomFieldsResponse.CustomFields;
+            return getCustomFieldsResponse.CustomFields ?? new List<GetCustomField>();
         }
     }
 
@@ -221,6 +243,9 @@ public sealed class CscGlobalClient : ICscGlobalClient
 
             var getRevokeResponse =
                 JsonConvert.DeserializeObject<RevokeResponse>(await resp.Content.ReadAsStringAsync());
+            if (getRevokeResponse == null)
+                throw new InvalidOperationException("Revoke request succeeded but the response body could not be parsed");
+
             Logger.MethodExit(LogLevel.Debug);
             return getRevokeResponse;
         }
@@ -239,14 +264,17 @@ public sealed class CscGlobalClient : ICscGlobalClient
 
         if (!resp.IsSuccessStatusCode)
         {
-            var responseMessage = resp.Content.ReadAsStringAsync().Result;
-            Logger.LogError(
-                $"Failed Request to Keyfactor. Retrying request. Status Code {resp.StatusCode} | Message: {responseMessage}");
+            var responseMessage = await resp.Content.ReadAsStringAsync();
+            Logger.LogError($"Certificate list request failed. Status Code {resp.StatusCode} | Message: {responseMessage}");
+            throw new HttpRequestException($"Certificate list request failed with status code {resp.StatusCode}: {responseMessage}");
         }
 
         var certificateListResponse =
             JsonConvert.DeserializeObject<CertificateListResponse>(await resp.Content.ReadAsStringAsync());
-        Logger.LogInformation($"Certificate list request returned {certificateListResponse?.Results?.Count ?? 0} result(s)");
+        if (certificateListResponse == null)
+            throw new InvalidOperationException("Certificate list request succeeded but the response body could not be parsed");
+
+        Logger.LogInformation($"Certificate list request returned {certificateListResponse.Results?.Count ?? 0} result(s)");
         Logger.MethodExit(LogLevel.Debug);
         return certificateListResponse;
     }
