@@ -177,8 +177,8 @@ public class RequestManager
             BusinessUnit = productInfo.ProductParameters["Business Unit"],
             ShowPrice = true, //User should not have to fill this out
             CustomFields = GetCustomFields(productInfo, customFields),
-            SubjectAlternativeNames = certificateType == "2" ? GetSubjectAlternativeNames(productInfo, sans) : null,
-            EvCertificateDetails = certificateType == "3" ? GetEvCertificateDetails(productInfo) : null
+            SubjectAlternativeNames = MultiNameCertificateTypes.Contains(certificateType) ? GetSubjectAlternativeNames(productInfo, sans) : null,
+            EvCertificateDetails = EvCertificateTypes.Contains(certificateType) ? GetEvCertificateDetails(productInfo) : null
         };
     }
 
@@ -206,10 +206,19 @@ public class RequestManager
                 return "5";
             case "CSC TrustedSecure Domain Validated UC Certificate":
                 return "6";
+            case "CSC TrustedSecure EV, Multiple Names":
+                return "7";
+            case "CSC TrustedSecure OV Wildcard, Multiple Names":
+                return "8";
+            case "CSC TrustedSecure DV Wildcard, Multiple Names":
+                return "9";
         }
 
         return "-1";
     }
+
+    private static readonly HashSet<string> MultiNameCertificateTypes = new() { "2", "7", "8", "9" };
+    private static readonly HashSet<string> EvCertificateTypes = new() { "3", "7" };
 
     public Notifications GetNotifications(EnrollmentProductInfo productInfo)
     {
@@ -250,9 +259,9 @@ public class RequestManager
             OrganizationContact = productInfo.ProductParameters["Organization Contact"],
             BusinessUnit = productInfo.ProductParameters["Business Unit"],
             ShowPrice = true,
-            SubjectAlternativeNames = certificateType == "2" ? GetSubjectAlternativeNames(productInfo, sans) : null,
+            SubjectAlternativeNames = MultiNameCertificateTypes.Contains(certificateType) ? GetSubjectAlternativeNames(productInfo, sans) : null,
             CustomFields = GetCustomFields(productInfo, customFields),
-            EvCertificateDetails = certificateType == "3" ? GetEvCertificateDetails(productInfo) : null
+            EvCertificateDetails = EvCertificateTypes.Contains(certificateType) ? GetEvCertificateDetails(productInfo) : null
         };
     }
 
@@ -308,9 +317,9 @@ public class RequestManager
             OrganizationContact = productInfo.ProductParameters["Organization Contact"],
             BusinessUnit = productInfo.ProductParameters["Business Unit"],
             ShowPrice = true,
-            SubjectAlternativeNames = certificateType == "2" ? GetSubjectAlternativeNames(productInfo, sans) : null,
+            SubjectAlternativeNames = MultiNameCertificateTypes.Contains(certificateType) ? GetSubjectAlternativeNames(productInfo, sans) : null,
             CustomFields = GetCustomFields(productInfo, customFields),
-            EvCertificateDetails = certificateType == "3" ? GetEvCertificateDetails(productInfo) : null
+            EvCertificateDetails = EvCertificateTypes.Contains(certificateType) ? GetEvCertificateDetails(productInfo) : null
         };
     }
 

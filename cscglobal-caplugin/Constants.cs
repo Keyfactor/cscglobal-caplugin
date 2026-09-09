@@ -27,7 +27,10 @@ public class ProductIDs
         "CSC TrustedSecure Premium Wildcard Certificate",
         "CSC TrustedSecure Domain Validated SSL",
         "CSC TrustedSecure Domain Validated Wildcard SSL",
-        "CSC TrustedSecure Domain Validated UC Certificate"
+        "CSC TrustedSecure Domain Validated UC Certificate",
+        "CSC TrustedSecure EV, Multiple Names",
+        "CSC TrustedSecure OV Wildcard, Multiple Names",
+        "CSC TrustedSecure DV Wildcard, Multiple Names"
     };
 }
 
