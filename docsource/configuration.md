@@ -216,3 +216,91 @@ Notification Email(s) Comma Separated | String | N/A
 CN DCV Email | String | N/A
 Addtl Sans Comma Separated DCV Emails | String | N/A
 
+**CSC TrustedSecure EV, Multiple Names - Details Tab**
+
+CONFIG ELEMENT				| DESCRIPTION
+----------------------------|------------------
+Template Short Name	| CSC TrustedSecure EV, Multiple Names
+Template Display Name	| CSC TrustedSecure EV, Multiple Names
+Friendly Name	| CSC TrustedSecure EV, Multiple Names
+Keys Size  | 2048
+Enforce RFC 2818 Compliance | True
+CSR Enrollment | True
+Pfx Enrollment | True
+
+
+**CSC TrustedSecure EV, Multiple Names - Enrollment Fields**
+
+NAME | DATA TYPE	| VALUES
+-----|--------------|-----------------
+Term | Multiple Choice | 12,24
+Applicant First Name | String | N/A
+Applicant Last Name | String | N/A
+Applicant Email Address | String | N/A
+Applicant Phone | String | N/A
+Domain Control Validation Method | Multiple Choice | EMAIL
+Organization Contact | Multiple Choice | Get From CSC Differs For Clients
+Business Unit | Multiple Choice | Get From CSC Differs For Clients
+Notification Email(s) Comma Separated | String | N/A
+CN DCV Email | String | N/A
+Organization Country | String | N/A
+Addtl Sans Comma Separated DCV Emails | String | N/A
+
+**CSC TrustedSecure OV Wildcard, Multiple Names - Details Tab**
+
+CONFIG ELEMENT				| DESCRIPTION
+----------------------------|------------------
+Template Short Name	| CSC TrustedSecure OV Wildcard, Multiple Names
+Template Display Name	| CSC TrustedSecure OV Wildcard, Multiple Names
+Friendly Name	| CSC TrustedSecure OV Wildcard, Multiple Names
+Keys Size  | 2048
+Enforce RFC 2818 Compliance | True
+CSR Enrollment | True
+Pfx Enrollment | True
+
+
+**CSC TrustedSecure OV Wildcard, Multiple Names - Enrollment Fields**
+
+NAME | DATA TYPE	| VALUES
+-----|--------------|-----------------
+Term | Multiple Choice | 12,24
+Applicant First Name | String | N/A
+Applicant Last Name | String | N/A
+Applicant Email Address | String | N/A
+Applicant Phone | String | N/A
+Domain Control Validation Method | Multiple Choice | EMAIL
+Organization Contact | Multiple Choice | Get From CSC Differs For Clients
+Business Unit | Multiple Choice | Get From CSC Differs For Clients
+Notification Email(s) Comma Separated | String | N/A
+CN DCV Email | String | N/A
+Addtl Sans Comma Separated DCV Emails | String | N/A
+
+**CSC TrustedSecure DV Wildcard, Multiple Names - Details Tab**
+
+CONFIG ELEMENT				| DESCRIPTION
+----------------------------|------------------
+Template Short Name	| CSC TrustedSecure DV Wildcard, Multiple Names
+Template Display Name	| CSC TrustedSecure DV Wildcard, Multiple Names
+Friendly Name	| CSC TrustedSecure DV Wildcard, Multiple Names
+Keys Size  | 2048
+Enforce RFC 2818 Compliance | True
+CSR Enrollment | True
+Pfx Enrollment | True
+
+
+**CSC TrustedSecure DV Wildcard, Multiple Names - Enrollment Fields**
+
+NAME | DATA TYPE	| VALUES
+-----|--------------|-----------------
+Term | Multiple Choice | 12,24
+Applicant First Name | String | N/A
+Applicant Last Name | String | N/A
+Applicant Email Address | String | N/A
+Applicant Phone | String | N/A
+Domain Control Validation Method | Multiple Choice | EMAIL
+Organization Contact | Multiple Choice | Get From CSC Differs For Clients
+Business Unit | Multiple Choice | Get From CSC Differs For Clients
+Notification Email(s) Comma Separated | String | N/A
+CN DCV Email | String | N/A
+Addtl Sans Comma Separated DCV Emails | String | N/A
+
