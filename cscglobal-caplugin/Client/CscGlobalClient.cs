@@ -254,11 +254,11 @@ public sealed class CscGlobalClient : ICscGlobalClient
     public async Task<CertificateListResponse> SubmitCertificateListRequestAsync(string? dateFilter = null)
     {
         Logger.MethodEntry(LogLevel.Debug);
-        var filterQuery = "filter=status=in=(ACTIVE,REVOKED)";
-        if (!string.IsNullOrEmpty(dateFilter))
-        {
-            filterQuery += $";effectiveDate=ge={dateFilter}";
-        }
+        // Intentionally not filtering by status here: Command's sync considers any request that
+        // isn't returned in a sync cycle as "outdated" and tries to prune it, which can hit an
+        // internal Command bug for requests with no staged private key. Returning every status
+        // (not just ACTIVE/REVOKED) keeps every known request visible to Command on every sync.
+        var filterQuery = !string.IsNullOrEmpty(dateFilter) ? $"filter=effectiveDate=ge={dateFilter}" : string.Empty;
         Logger.LogTrace($"Certificate list filter query: {filterQuery}");
         var resp = RestClient.GetAsync($"/dbs/api/v2/tls/certificate?{filterQuery}").Result;
 
