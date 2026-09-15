@@ -308,25 +308,19 @@ public class RequestManager
     {
         switch (productId)
         {
-            case "CSC TrustedSecure Premium Certificate":
+            case "CSC TrustedSecure OV":
                 return "0";
-            case "CSC TrustedSecure EV Certificate":
-                return "3";
-            case "CSC TrustedSecure UC Certificate":
-                return "2";
-            case "CSC TrustedSecure Premium Wildcard Certificate":
+            case "CSC TrustedSecure OV Wildcard":
                 return "1";
-            case "CSC Trusted Secure Domain Validated SSL":
+            case "CSC TrustedSecure OV, Multiple Names":
+                return "2";
+            case "CSC TrustedSecure EV":
+                return "3";
+            case "CSC TrustedSecure DV":
                 return "4";
-            case "CSC Trusted Secure Domain Validated Wildcard SSL":
+            case "CSC TrustedSecure DV Wildcard":
                 return "5";
-            case "CSC Trusted Secure Domain Validated UC Certificate":
-                return "6";
-            case "CSC TrustedSecure Domain Validated SSL":
-                return "4";
-            case "CSC TrustedSecure Domain Validated Wildcard SSL":
-                return "5";
-            case "CSC TrustedSecure Domain Validated UC Certificate":
+            case "CSC TrustedSecure DV, Multiple Names":
                 return "6";
             case "CSC TrustedSecure EV, Multiple Names":
                 return "7";
@@ -338,36 +332,6 @@ public class RequestManager
 
         Logger.LogWarning($"Unrecognized product ID '{productId}'; defaulting certificate type to -1");
         return "-1";
-    }
-
-    // CSC Global's API returns its current product names in sync/list responses (e.g. "CSC TrustedSecure DV"),
-    // which differ from the legacy names this plugin's ProductIDs/GetCertificateType use as Command's ProductID
-    // (e.g. "CSC TrustedSecure Domain Validated SSL"). Map back to our legacy names so Command's Certificate
-    // Profile/Template mapping (keyed on our ProductID) can resolve synced certificates.
-    private static readonly Dictionary<string, string> CscCertificateTypeToProductId = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ["CSC TrustedSecure OV"] = "CSC TrustedSecure Premium Certificate",
-        ["CSC TrustedSecure OV Wildcard"] = "CSC TrustedSecure Premium Wildcard Certificate",
-        ["CSC TrustedSecure OV, Multiple Names"] = "CSC TrustedSecure UC Certificate",
-        ["CSC TrustedSecure EV"] = "CSC TrustedSecure EV Certificate",
-        ["CSC TrustedSecure DV"] = "CSC TrustedSecure Domain Validated SSL",
-        ["CSC TrustedSecure DV Wildcard"] = "CSC TrustedSecure Domain Validated Wildcard SSL",
-        ["CSC TrustedSecure DV, Multiple Names"] = "CSC TrustedSecure Domain Validated UC Certificate",
-        ["CSC TrustedSecure EV, Multiple Names"] = "CSC TrustedSecure EV, Multiple Names",
-        ["CSC TrustedSecure OV Wildcard, Multiple Names"] = "CSC TrustedSecure OV Wildcard, Multiple Names",
-        ["CSC TrustedSecure DV Wildcard, Multiple Names"] = "CSC TrustedSecure DV Wildcard, Multiple Names"
-    };
-
-    public string MapCertificateTypeToProductId(string cscCertificateType)
-    {
-        if (string.IsNullOrEmpty(cscCertificateType))
-            return cscCertificateType;
-
-        if (CscCertificateTypeToProductId.TryGetValue(cscCertificateType, out var productId))
-            return productId;
-
-        Logger.LogWarning($"Unrecognized CSC Global certificate type '{cscCertificateType}' returned during sync; using it as-is for ProductID");
-        return cscCertificateType;
     }
 
     private static readonly HashSet<string> MultiNameCertificateTypes = new() { "2", "7", "8", "9" };
