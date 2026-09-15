@@ -191,7 +191,7 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
             {
                 //One click renewal/reissue won't work for this implementation so there is an option to disable it by not syncing back template
                 var productId = "CscGlobal";
-                if (EnableTemplateSync) productId = currentResponseItem?.CertificateType;
+                if (EnableTemplateSync) productId = _requestManager.MapCertificateTypeToProductId(currentResponseItem?.CertificateType);
 
                 var fileContent =
                     PreparePemTextFromApi(

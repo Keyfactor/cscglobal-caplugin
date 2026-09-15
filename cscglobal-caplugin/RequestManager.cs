@@ -340,6 +340,36 @@ public class RequestManager
         return "-1";
     }
 
+    // CSC Global's API returns its current product names in sync/list responses (e.g. "CSC TrustedSecure DV"),
+    // which differ from the legacy names this plugin's ProductIDs/GetCertificateType use as Command's ProductID
+    // (e.g. "CSC TrustedSecure Domain Validated SSL"). Map back to our legacy names so Command's Certificate
+    // Profile/Template mapping (keyed on our ProductID) can resolve synced certificates.
+    private static readonly Dictionary<string, string> CscCertificateTypeToProductId = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["CSC TrustedSecure OV"] = "CSC TrustedSecure Premium Certificate",
+        ["CSC TrustedSecure OV Wildcard"] = "CSC TrustedSecure Premium Wildcard Certificate",
+        ["CSC TrustedSecure OV, Multiple Names"] = "CSC TrustedSecure UC Certificate",
+        ["CSC TrustedSecure EV"] = "CSC TrustedSecure EV Certificate",
+        ["CSC TrustedSecure DV"] = "CSC TrustedSecure Domain Validated SSL",
+        ["CSC TrustedSecure DV Wildcard"] = "CSC TrustedSecure Domain Validated Wildcard SSL",
+        ["CSC TrustedSecure DV, Multiple Names"] = "CSC TrustedSecure Domain Validated UC Certificate",
+        ["CSC TrustedSecure EV, Multiple Names"] = "CSC TrustedSecure EV, Multiple Names",
+        ["CSC TrustedSecure OV Wildcard, Multiple Names"] = "CSC TrustedSecure OV Wildcard, Multiple Names",
+        ["CSC TrustedSecure DV Wildcard, Multiple Names"] = "CSC TrustedSecure DV Wildcard, Multiple Names"
+    };
+
+    public string MapCertificateTypeToProductId(string cscCertificateType)
+    {
+        if (string.IsNullOrEmpty(cscCertificateType))
+            return cscCertificateType;
+
+        if (CscCertificateTypeToProductId.TryGetValue(cscCertificateType, out var productId))
+            return productId;
+
+        Logger.LogWarning($"Unrecognized CSC Global certificate type '{cscCertificateType}' returned during sync; using it as-is for ProductID");
+        return cscCertificateType;
+    }
+
     private static readonly HashSet<string> MultiNameCertificateTypes = new() { "2", "7", "8", "9" };
     private static readonly HashSet<string> EvCertificateTypes = new() { "3", "7" };
 
