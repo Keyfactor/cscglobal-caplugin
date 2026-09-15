@@ -178,25 +178,21 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
         }
 
         var queuedCount = 0;
-        var queuedWithoutCertCount = 0;
+        var skippedCount = 0;
         foreach (var currentResponseItem in certs.Results)
         {
             cancelToken.ThrowIfCancellationRequested();
             Logger.LogTrace($"Took Certificate ID {currentResponseItem?.Uuid} from Queue");
             var certStatus = _requestManager.MapReturnStatus(currentResponseItem?.Status);
 
-            //Every known request is always reported back to Command, even without a certificate,
-            //so Command never considers a still-pending or failed request "outdated" and tries to
-            //prune it (which can hit an internal Command bug for requests with no staged private key).
-            var productId = "CscGlobal";
-            if (EnableTemplateSync) productId = currentResponseItem?.CertificateType;
-
-            var certString = string.Empty;
-            var hasIssuedOrRevokedCert = certStatus == Convert.ToInt32(EndEntityStatus.GENERATED) ||
-                                         certStatus == Convert.ToInt32(EndEntityStatus.REVOKED);
-
-            if (hasIssuedOrRevokedCert)
+            //Keyfactor sync only seems to work when there is a valid cert and I can only get Active valid certs from Csc Global
+            if (certStatus == Convert.ToInt32(EndEntityStatus.GENERATED) ||
+                certStatus == Convert.ToInt32(EndEntityStatus.REVOKED))
             {
+                //One click renewal/reissue won't work for this implementation so there is an option to disable it by not syncing back template
+                var productId = "CscGlobal";
+                if (EnableTemplateSync) productId = currentResponseItem?.CertificateType;
+
                 var fileContent =
                     PreparePemTextFromApi(
                         currentResponseItem?.Certificate ?? string.Empty);
@@ -205,33 +201,39 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
                 {
                     Logger.LogTrace($"File Content {fileContent}");
                     var certData = fileContent.Replace("\r\n", string.Empty);
-                    certString = GetEndEntityCertificate(certData);
+                    var certString = GetEndEntityCertificate(certData);
+                    if (certString.Length > 0)
+                    {
+                        blockingBuffer.Add(new AnyCAPluginCertificate
+                        {
+                            CARequestID = $"{currentResponseItem?.Uuid}",
+                            Certificate = certString,
+                            Status = certStatus,
+                            ProductID = productId
+                        }, cancelToken);
+                        queuedCount++;
+                    }
+                    else
+                    {
+                        Logger.LogWarning($"Could not extract end-entity certificate for {currentResponseItem?.Uuid}; skipping sync of this record");
+                        skippedCount++;
+                    }
                 }
-
-                if (string.IsNullOrEmpty(certString))
-                    Logger.LogWarning($"Could not extract end-entity certificate for {currentResponseItem?.Uuid} (status {currentResponseItem?.Status}); syncing status only");
+                else
+                {
+                    Logger.LogWarning($"No certificate content returned by CSC Global for {currentResponseItem?.Uuid}; skipping sync of this record");
+                    skippedCount++;
+                }
             }
             else
             {
-                Logger.LogTrace($"Certificate ID {currentResponseItem?.Uuid} - status {currentResponseItem?.Status} has no certificate content yet; syncing status only");
+                Logger.LogTrace($"Skipping Certificate ID {currentResponseItem?.Uuid} - status {currentResponseItem?.Status} is not eligible for sync");
+                skippedCount++;
             }
-
-            blockingBuffer.Add(new AnyCAPluginCertificate
-            {
-                CARequestID = $"{currentResponseItem?.Uuid}",
-                Certificate = certString,
-                Status = certStatus,
-                ProductID = productId
-            }, cancelToken);
-
-            if (string.IsNullOrEmpty(certString))
-                queuedWithoutCertCount++;
-            else
-                queuedCount++;
         }
 
-        flow.Step("QueueCertificates", $"Queued {queuedCount} with certificates, {queuedWithoutCertCount} status-only");
-        Logger.LogInformation($"Sync queued {queuedCount} certificate(s) with content, {queuedWithoutCertCount} status-only record(s)");
+        flow.Step("QueueCertificates", $"Queued {queuedCount}, skipped {skippedCount}");
+        Logger.LogInformation($"Sync queued {queuedCount} certificate(s), skipped {skippedCount}");
     }
 
     //done
