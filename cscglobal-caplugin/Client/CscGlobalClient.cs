@@ -21,7 +21,11 @@ public sealed class CscGlobalClient : ICscGlobalClient
 {
     private readonly ILogger Logger;
 
-    public CscGlobalClient(IAnyCAPluginConfigProvider config)
+    public CscGlobalClient(IAnyCAPluginConfigProvider config) : this(config, null)
+    {
+    }
+
+    internal CscGlobalClient(IAnyCAPluginConfigProvider config, HttpMessageHandler? handler)
     {
         Logger = LogHandler.GetClassLogger<CscGlobalClient>();
         if (config == null) throw new ArgumentNullException(nameof(config));
@@ -36,7 +40,7 @@ public sealed class CscGlobalClient : ICscGlobalClient
             BaseUrl = new Uri(config.CAConnectionData[Constants.CscGlobalUrl].ToString());
             ApiKey = config.CAConnectionData[Constants.CscGlobalApiKey].ToString();
             Authorization = config.CAConnectionData[Constants.BearerToken].ToString();
-            RestClient = ConfigureRestClient();
+            RestClient = ConfigureRestClient(handler);
             Logger.LogDebug($"CscGlobalClient configured for base URL {BaseUrl}");
         }
         else
@@ -260,7 +264,7 @@ public sealed class CscGlobalClient : ICscGlobalClient
             filterQuery += $";effectiveDate=ge={dateFilter}";
         }
         Logger.LogTrace($"Certificate list filter query: {filterQuery}");
-        var resp = RestClient.GetAsync($"/dbs/api/v2/tls/certificate?{filterQuery}").Result;
+        var resp = await RestClient.GetAsync($"/dbs/api/v2/tls/certificate?{filterQuery}");
 
         if (!resp.IsSuccessStatusCode)
         {
@@ -279,10 +283,9 @@ public sealed class CscGlobalClient : ICscGlobalClient
         return certificateListResponse;
     }
 
-    private HttpClient ConfigureRestClient()
+    private HttpClient ConfigureRestClient(HttpMessageHandler? handler = null)
     {
-        var clientHandler = new HttpClientHandler();
-        var returnClient = new HttpClient(clientHandler, true)
+        var returnClient = new HttpClient(handler ?? new HttpClientHandler(), true)
         {
             BaseAddress = BaseUrl
         };

@@ -334,7 +334,7 @@ public class RequestManager
         return "-1";
     }
 
-    private static readonly HashSet<string> MultiNameCertificateTypes = new() { "2", "7", "8", "9" };
+    private static readonly HashSet<string> MultiNameCertificateTypes = new() { "2", "6", "7", "8", "9" };
     private static readonly HashSet<string> EvCertificateTypes = new() { "3", "7" };
 
     public Notifications GetNotifications(EnrollmentProductInfo productInfo)

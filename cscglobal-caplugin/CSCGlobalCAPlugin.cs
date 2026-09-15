@@ -33,7 +33,12 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
         _requestManager = new RequestManager();
     }
 
-    private ICscGlobalClient CscGlobalClient { get; set; }
+    internal Func<IAnyCAPluginConfigProvider, ICscGlobalClient> ClientFactory { get; set; }
+        = config => new CscGlobalClient(config);
+
+    private IAnyCAPluginConfigProvider Config { get; set; }
+
+    private ICscGlobalClient CscGlobalClient => ClientFactory(Config);
 
     public int SyncFilterDays { get; set; }
 
@@ -43,7 +48,7 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
         Logger.MethodEntry(LogLevel.Debug);
         if (configProvider == null) throw new ArgumentNullException(nameof(configProvider));
         _certificateDataReader = certificateDataReader ?? throw new ArgumentNullException(nameof(certificateDataReader));
-        CscGlobalClient = new CscGlobalClient(configProvider);
+        Config = configProvider;
 
         if (configProvider.CAConnectionData.ContainsKey(Constants.SyncFilterDays))
         {
@@ -290,7 +295,7 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
             ReissueRequest reissueRequest;
             RenewalRequest renewRequest;
             var productParameters = productInfo.ProductParameters ?? new Dictionary<string, string>();
-            if (productParameters.ContainsKey("priorcertsn"))
+            if (productParameters.ContainsKey("PriorCertSN"))
             {
                 productParameters.TryGetValue("PriorCertSN", out priorSn);
                 priorSn ??= "";
