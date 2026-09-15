@@ -43,10 +43,15 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
     public void Initialize(IAnyCAPluginConfigProvider configProvider, ICertificateDataReader certificateDataReader)
     {
         Logger.MethodEntry(LogLevel.Debug);
-        _certificateDataReader = certificateDataReader;
+        if (configProvider == null) throw new ArgumentNullException(nameof(configProvider));
+        _certificateDataReader = certificateDataReader ?? throw new ArgumentNullException(nameof(certificateDataReader));
         CscGlobalClient = new CscGlobalClient(configProvider);
-        var templateSync = configProvider.CAConnectionData["TemplateSync"].ToString();
-        if (templateSync.ToUpper() == "ON") EnableTemplateSync = true;
+
+        if (configProvider.CAConnectionData.TryGetValue("TemplateSync", out var templateSyncValue) &&
+            templateSyncValue != null &&
+            string.Equals(templateSyncValue.ToString(), "ON", StringComparison.OrdinalIgnoreCase))
+            EnableTemplateSync = true;
+        Logger.LogInformation($"Template sync is {(EnableTemplateSync ? "enabled" : "disabled")}");
 
         if (configProvider.CAConnectionData.ContainsKey(Constants.SyncFilterDays))
         {
@@ -56,7 +61,13 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
                 SyncFilterDays = syncFilterDays;
                 Logger.LogDebug($"SyncFilterDays configured to {SyncFilterDays} days");
             }
+            else
+            {
+                Logger.LogWarning($"Could not parse {Constants.SyncFilterDays} value '{syncFilterDaysStr}' as an integer; using default");
+            }
         }
+
+        Logger.LogInformation("CSCGlobalCAPlugin initialized successfully");
         Logger.MethodExit(LogLevel.Debug);
     }
 
@@ -66,7 +77,10 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
         try
         {
             Logger.MethodEntry(LogLevel.Debug);
-            var keyfactorCaId = caRequestID?.Substring(0, 36); //todo fix to use pipe delimiter
+            if (string.IsNullOrEmpty(caRequestID) || caRequestID.Length < 36)
+                throw new ArgumentException($"CA request ID '{caRequestID}' is missing or too short to contain a valid UUID", nameof(caRequestID));
+
+            var keyfactorCaId = caRequestID.Substring(0, 36); //todo fix to use pipe delimiter
             Logger.LogTrace($"Keyfactor Ca Id: {keyfactorCaId}");
             var certificateResponse =
                 Task.Run(async () => await CscGlobalClient.SubmitGetCertificateAsync(keyfactorCaId))
@@ -96,6 +110,7 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
         }
         catch (Exception e)
         {
+            Logger.LogError(e, "Error occurred getting single cert for CA request ID {CaRequestID}: {Message}", caRequestID, e.Message);
             throw new Exception($"Error Occurred getting single cert {e.Message}");
         }
     }
@@ -106,27 +121,39 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
     {
         Logger.LogTrace($"Full Sync? {fullSync.ToString()}");
         Logger.MethodEntry();
+        using var flow = new FlowLogger(Logger, "Synchronize");
         try
         {
             if (fullSync)
             {
-                Logger.LogDebug("Performing full sync - no date filter applied");
-                await SyncCertificates(blockingBuffer, cancelToken, null);
+                Logger.LogInformation("Performing full sync - no date filter applied");
+                flow.Step("DetermineSyncMode", "Full sync - no date filter applied");
+                await SyncCertificates(blockingBuffer, cancelToken, null, flow);
             }
             else
             {
                 var filterDays = SyncFilterDays > 0 ? SyncFilterDays : 5;
                 var filterDate = DateTime.Today.Subtract(TimeSpan.FromDays(filterDays));
                 var dateFilter = filterDate.ToString("yyyy/MM/dd");
-                Logger.LogDebug($"Performing incremental sync with expiration date filter: {dateFilter}");
-                await SyncCertificates(blockingBuffer, cancelToken, dateFilter);
+                Logger.LogInformation($"Performing incremental sync with expiration date filter: {dateFilter}");
+                flow.Step("DetermineSyncMode", $"Incremental sync with expiration date filter: {dateFilter}");
+                await SyncCertificates(blockingBuffer, cancelToken, dateFilter, flow);
             }
 
             blockingBuffer.CompleteAdding();
+            Logger.LogInformation("Csc Global Synchronize Task completed successfully");
+        }
+        catch (OperationCanceledException)
+        {
+            Logger.LogWarning("Csc Global Synchronize Task was cancelled");
+            flow.Fail("Synchronize", "Task was cancelled");
+            blockingBuffer.CompleteAdding();
+            throw;
         }
         catch (Exception e)
         {
-            Logger.LogError($"Csc Global Synchronize Task failed! {LogHandler.FlattenException(e)}");
+            Logger.LogError(e, $"Csc Global Synchronize Task failed! {LogHandler.FlattenException(e)}");
+            flow.Fail("Synchronize", e.Message);
             Logger.MethodExit();
             blockingBuffer.CompleteAdding();
             throw;
@@ -136,10 +163,22 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
     }
 
     private async Task SyncCertificates(BlockingCollection<AnyCAPluginCertificate> blockingBuffer,
-        CancellationToken cancelToken, string? dateFilter)
+        CancellationToken cancelToken, string? dateFilter, FlowLogger flow)
     {
-        var certs = await CscGlobalClient.SubmitCertificateListRequestAsync(dateFilter);
+        var certs = await flow.StepAsync("SubmitCertificateListRequest",
+            () => CscGlobalClient.SubmitCertificateListRequestAsync(dateFilter));
 
+        Logger.LogInformation($"Retrieved {certs?.Results?.Count ?? 0} certificate(s) from CSC Global for sync");
+
+        if (certs?.Results == null)
+        {
+            Logger.LogWarning("Certificate list request returned no results collection; nothing to sync");
+            flow.Step("QueueCertificates", "No results collection returned; nothing to sync");
+            return;
+        }
+
+        var queuedCount = 0;
+        var skippedCount = 0;
         foreach (var currentResponseItem in certs.Results)
         {
             cancelToken.ThrowIfCancellationRequested();
@@ -152,7 +191,7 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
             {
                 //One click renewal/reissue won't work for this implementation so there is an option to disable it by not syncing back template
                 var productId = "CscGlobal";
-                if (EnableTemplateSync) productId = currentResponseItem?.CertificateType;
+                if (EnableTemplateSync) productId = currentResponseItem?.CertificateType ?? productId;
 
                 var fileContent =
                     PreparePemTextFromApi(
@@ -164,6 +203,7 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
                     var certData = fileContent.Replace("\r\n", string.Empty);
                     var certString = GetEndEntityCertificate(certData);
                     if (certString.Length > 0)
+                    {
                         blockingBuffer.Add(new AnyCAPluginCertificate
                         {
                             CARequestID = $"{currentResponseItem?.Uuid}",
@@ -171,36 +211,73 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
                             Status = certStatus,
                             ProductID = productId
                         }, cancelToken);
+                        queuedCount++;
+                    }
+                    else
+                    {
+                        Logger.LogWarning($"Could not extract end-entity certificate for {currentResponseItem?.Uuid}; skipping sync of this record");
+                        skippedCount++;
+                    }
+                }
+                else
+                {
+                    Logger.LogWarning($"No certificate content returned by CSC Global for {currentResponseItem?.Uuid}; skipping sync of this record");
+                    skippedCount++;
                 }
             }
+            else
+            {
+                Logger.LogTrace($"Skipping Certificate ID {currentResponseItem?.Uuid} - status {currentResponseItem?.Status} is not eligible for sync");
+                skippedCount++;
+            }
         }
+
+        flow.Step("QueueCertificates", $"Queued {queuedCount}, skipped {skippedCount}");
+        Logger.LogInformation($"Sync queued {queuedCount} certificate(s), skipped {skippedCount}");
     }
 
     //done
     public async Task<int> Revoke(string caRequestID, string hexSerialNumber, uint revocationReason)
     {
+        Logger.MethodEntry(LogLevel.Debug);
+        using var flow = new FlowLogger(Logger, "Revoke");
         try
         {
-            Logger.LogTrace("Staring Revoke Method");
-            var revokeResponse =
-                    Task.Run(async () =>
-                        await CscGlobalClient.SubmitRevokeCertificateAsync(caRequestID.Substring(0, 36))).Result
-                ; //todo fix to use pipe delimiter
+            Logger.LogInformation($"Starting Revoke for CA request ID {caRequestID}, reason {revocationReason}");
+            if (string.IsNullOrEmpty(caRequestID) || caRequestID.Length < 36)
+                throw new ArgumentException($"CA request ID '{caRequestID}' is missing or too short to contain a valid UUID", nameof(caRequestID));
+
+            var uuid = caRequestID.Substring(0, 36); //todo fix to use pipe delimiter
+
+            var revokeResponse = await flow.StepAsync("SubmitRevokeCertificate",
+                () => CscGlobalClient.SubmitRevokeCertificateAsync(uuid));
 
             Logger.LogTrace($"Revoke Response JSON: {JsonConvert.SerializeObject(revokeResponse)}");
-            Logger.MethodExit(LogLevel.Debug);
 
             var revokeResult = _requestManager.GetRevokeResult(revokeResponse);
 
             if (revokeResult == (int)EndEntityStatus.FAILED)
+            {
                 if (!string.IsNullOrEmpty(revokeResponse?.RegistrationError?.Description))
+                {
+                    flow.Fail("SubmitRevokeCertificate", revokeResponse?.RegistrationError?.Description ?? "Unknown error");
                     throw new HttpRequestException(
                         $"Revoke Failed with message {revokeResponse?.RegistrationError?.Description}");
+                }
 
+                Logger.LogWarning($"Revoke returned a failed status for CA request ID {caRequestID} with no error description");
+            }
+            else
+            {
+                Logger.LogInformation($"Revoke succeeded for CA request ID {caRequestID}");
+            }
+
+            Logger.MethodExit(LogLevel.Debug);
             return revokeResult;
         }
         catch (Exception e)
         {
+            Logger.LogError(e, $"Revoke Failed for CA request ID {caRequestID} with message {e?.Message}");
             throw new Exception($"Revoke Failed with message {e?.Message}");
         }
     }
@@ -209,115 +286,194 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
     public async Task<EnrollmentResult> Enroll(string csr, string subject, Dictionary<string, string[]> san,
         EnrollmentProductInfo productInfo, RequestFormat requestFormat, EnrollmentType enrollmentType)
     {
+        if (productInfo == null) throw new ArgumentNullException(nameof(productInfo));
+
         Logger.MethodEntry(LogLevel.Debug);
+        Logger.LogInformation($"Starting Enroll for product {productInfo.ProductID}, enrollment type {enrollmentType}");
+        using var flow = new FlowLogger(Logger, "Enroll");
 
-        RegistrationRequest enrollmentRequest;
-        var priorSn = "";
-        ReissueRequest reissueRequest;
-        RenewalRequest renewRequest;
-        if (productInfo.ProductParameters.ContainsKey("priorcertsn"))
+        try
         {
-            priorSn = productInfo.ProductParameters["PriorCertSN"];
-            Logger.LogDebug($"Prior cert sn: {priorSn}");
-        }
+            RegistrationRequest enrollmentRequest;
+            var priorSn = "";
+            ReissueRequest reissueRequest;
+            RenewalRequest renewRequest;
+            var productParameters = productInfo.ProductParameters ?? new Dictionary<string, string>();
+            if (productParameters.ContainsKey("priorcertsn"))
+            {
+                productParameters.TryGetValue("PriorCertSN", out priorSn);
+                priorSn ??= "";
+                Logger.LogDebug($"Prior cert sn: {priorSn}");
+            }
 
-        string uUId;
-        var customFields = await CscGlobalClient.SubmitGetCustomFields();
+            string uUId;
+            var customFields = await flow.StepAsync("SubmitGetCustomFields", () => CscGlobalClient.SubmitGetCustomFields());
 
-        switch (enrollmentType)
-        {
-            case EnrollmentType.New:
-                Logger.LogTrace("Entering New Enrollment");
-                //If they renewed an expired cert it gets here and this will not be supported
-                IRegistrationResponse enrollmentResponse;
-                if (!productInfo.ProductParameters.ContainsKey("PriorCertSN"))
-                {
-                    enrollmentRequest = _requestManager.GetRegistrationRequest(productInfo, csr, san, customFields);
-                    Logger.LogTrace($"Enrollment Request JSON: {JsonConvert.SerializeObject(enrollmentRequest)}");
-                    enrollmentResponse =
-                        Task.Run(async () => await CscGlobalClient.SubmitRegistrationAsync(enrollmentRequest))
-                            .Result;
-                    Logger.LogTrace($"Enrollment Response JSON: {JsonConvert.SerializeObject(enrollmentResponse)}");
-                }
-                else
-                {
-                    return new EnrollmentResult
+            switch (enrollmentType)
+            {
+                case EnrollmentType.New:
+                    flow.Branch("New Enrollment");
+                    //If they renewed an expired cert it gets here and this will not be supported
+                    IRegistrationResponse enrollmentResponse;
+                    if (!productParameters.ContainsKey("PriorCertSN"))
                     {
-                        Status = 30, //failure
-                        StatusMessage = "You cannot renew an expired cert please perform an new enrollment."
-                    };
-                }
-
-                Logger.MethodExit(LogLevel.Debug);
-                return _requestManager.GetEnrollmentResult(enrollmentResponse);
-            case EnrollmentType.RenewOrReissue:
-                Logger.LogTrace("Entering Renew Enrollment");
-                //Logic to determine renew vs reissue
-                var renewal = false;
-                var order_id = await _certificateDataReader.GetRequestIDBySerialNumber(priorSn);
-                var expirationDate = _certificateDataReader.GetExpirationDateByRequestId(order_id);
-                if (expirationDate == null)
-                {
-                    var localcert = await GetSingleRecord(order_id);
-                    expirationDate = localcert.RevocationDate;
-                }
-
-                if (expirationDate < DateTime.Now) renewal = true;
-                if (renewal)
-                {
-                    //One click won't work for this implementation b/c we are missing enrollment params
-                    if (productInfo.ProductParameters.ContainsKey("Applicant Last Name"))
+                        enrollmentRequest = _requestManager.GetRegistrationRequest(productInfo, csr, san, customFields);
+                        Logger.LogTrace($"Enrollment Request JSON: {JsonConvert.SerializeObject(enrollmentRequest)}");
+                        enrollmentResponse = await flow.StepAsync("SubmitRegistration",
+                            () => CscGlobalClient.SubmitRegistrationAsync(enrollmentRequest));
+                        Logger.LogTrace($"Enrollment Response JSON: {JsonConvert.SerializeObject(enrollmentResponse)}");
+                    }
+                    else
                     {
-                        //priorCert = _certificateDataReader.get(
-                        //DataConversion.HexToBytes(productInfo.ProductParameters["PriorCertSN"]));
-                        //uUId = priorCert.CARequestID.Substring(0, 36); //uUId is a GUID
-                        uUId = await _certificateDataReader.GetRequestIDBySerialNumber(
-                            productInfo.ProductParameters["PriorCertSN"]);
-                        Logger.LogTrace($"Renew uUId: {uUId}");
-                        renewRequest = _requestManager.GetRenewalRequest(productInfo, uUId, csr, san, customFields);
-                        Logger.LogTrace($"Renewal Request JSON: {JsonConvert.SerializeObject(renewRequest)}");
-                        var renewResponse = Task.Run(async () => await CscGlobalClient.SubmitRenewalAsync(renewRequest))
-                            .Result;
-                        Logger.LogTrace($"Renewal Response JSON: {JsonConvert.SerializeObject(renewResponse)}");
-                        Logger.MethodExit(LogLevel.Debug);
-                        return _requestManager.GetRenewResponse(renewResponse);
+                        Logger.LogWarning("Cannot renew an expired cert via new enrollment; a new enrollment must be performed instead");
+                        flow.Fail("New Enrollment", "Attempted to renew an expired cert via new enrollment");
+                        flow.EndBranch();
+                        return new EnrollmentResult
+                        {
+                            Status = 30, //failure
+                            StatusMessage = "You cannot renew an expired cert please perform an new enrollment."
+                        };
                     }
 
+                    flow.EndBranch();
+                    var newResult = _requestManager.GetEnrollmentResult(enrollmentResponse);
+                    LogEnrollmentOutcome(newResult, "New Enrollment");
+                    Logger.MethodExit(LogLevel.Debug);
+                    return newResult;
+                case EnrollmentType.RenewOrReissue:
+                    flow.Branch("Renew Or Reissue");
+                    if (string.IsNullOrEmpty(priorSn))
+                    {
+                        Logger.LogWarning($"Renew/Reissue requested for product {productInfo.ProductID} but no prior certificate serial number was supplied");
+                        flow.Fail("Renew Or Reissue", "Missing prior certificate serial number");
+                        flow.EndBranch();
+                        return new EnrollmentResult
+                        {
+                            Status = 30, //failure
+                            StatusMessage = "Cannot renew or reissue: no prior certificate serial number was supplied."
+                        };
+                    }
+
+                    //Logic to determine renew vs reissue
+                    var renewal = false;
+                    var order_id = await _certificateDataReader.GetRequestIDBySerialNumber(priorSn);
+                    if (string.IsNullOrEmpty(order_id))
+                    {
+                        Logger.LogWarning($"Could not find a Keyfactor request ID for prior certificate serial number {priorSn}");
+                        flow.Fail("Renew Or Reissue", $"No request ID found for prior certificate serial number {priorSn}");
+                        flow.EndBranch();
+                        return new EnrollmentResult
+                        {
+                            Status = 30, //failure
+                            StatusMessage = $"Cannot renew or reissue: no prior request found for serial number {priorSn}."
+                        };
+                    }
+
+                    var expirationDate = _certificateDataReader.GetExpirationDateByRequestId(order_id);
+                    if (expirationDate == null)
+                    {
+                        var localcert = await GetSingleRecord(order_id);
+                        expirationDate = localcert?.RevocationDate;
+                    }
+
+                    if (expirationDate < DateTime.Now) renewal = true;
+                    if (renewal)
+                    {
+                        flow.Step("DetermineRenewOrReissue", "Renewal - cert is expired");
+                        //One click won't work for this implementation b/c we are missing enrollment params
+                        if (productParameters.ContainsKey("Applicant Last Name"))
+                        {
+                            //priorCert = _certificateDataReader.get(
+                            //DataConversion.HexToBytes(productInfo.ProductParameters["PriorCertSN"]));
+                            //uUId = priorCert.CARequestID.Substring(0, 36); //uUId is a GUID
+                            uUId = await _certificateDataReader.GetRequestIDBySerialNumber(
+                                productParameters.GetValueOrDefault("PriorCertSN", ""));
+                            Logger.LogTrace($"Renew uUId: {uUId}");
+                            renewRequest = _requestManager.GetRenewalRequest(productInfo, uUId, csr, san, customFields);
+                            Logger.LogTrace($"Renewal Request JSON: {JsonConvert.SerializeObject(renewRequest)}");
+                            var renewResponse = await flow.StepAsync("SubmitRenewal",
+                                () => CscGlobalClient.SubmitRenewalAsync(renewRequest));
+                            Logger.LogTrace($"Renewal Response JSON: {JsonConvert.SerializeObject(renewResponse)}");
+                            flow.EndBranch();
+                            var renewResult = _requestManager.GetRenewResponse(renewResponse);
+                            LogEnrollmentOutcome(renewResult, "Renewal");
+                            Logger.MethodExit(LogLevel.Debug);
+                            return renewResult;
+                        }
+
+                        Logger.LogWarning($"One click renew is not available for product {productInfo.ProductID}; missing required enrollment parameters");
+                        flow.Fail("Renewal", "One click renew is not available; missing Applicant Last Name");
+                        flow.EndBranch();
+                        return new EnrollmentResult
+                        {
+                            Status = 30, //failure
+                            StatusMessage =
+                                "One click Renew Is Not Available for this Certificate Type.  Use the configure button instead."
+                        };
+                    }
+
+                    flow.Step("DetermineRenewOrReissue", "Reissue - cert is still valid");
+                    //One click won't work for this implementation b/c we are missing enrollment params
+                    if (productParameters.ContainsKey("Applicant Last Name"))
+                    {
+                        var requestid = await _certificateDataReader.GetRequestIDBySerialNumber(
+                            productParameters.GetValueOrDefault("PriorCertSN", ""));
+                        if (string.IsNullOrEmpty(requestid) || requestid.Length < 36)
+                        {
+                            Logger.LogWarning($"Could not find a valid Keyfactor request ID for prior certificate serial number for product {productInfo.ProductID}");
+                            flow.Fail("Reissue", "No valid request ID found for prior certificate serial number");
+                            flow.EndBranch();
+                            return new EnrollmentResult
+                            {
+                                Status = 30, //failure
+                                StatusMessage = "Cannot reissue: no prior request found for the supplied certificate serial number."
+                            };
+                        }
+
+                        uUId = requestid.Substring(0, 36); //uUId is a GUID
+                        Logger.LogTrace($"Reissue uUId: {uUId}");
+                        reissueRequest = _requestManager.GetReissueRequest(productInfo, uUId, csr, san, customFields);
+                        Logger.LogTrace($"Reissue JSON: {JsonConvert.SerializeObject(reissueRequest)}");
+                        var reissueResponse = await flow.StepAsync("SubmitReissue",
+                            () => CscGlobalClient.SubmitReissueAsync(reissueRequest));
+                        Logger.LogTrace($"Reissue Response JSON: {JsonConvert.SerializeObject(reissueResponse)}");
+                        flow.EndBranch();
+                        var reissueResult = _requestManager.GetReIssueResult(reissueResponse);
+                        LogEnrollmentOutcome(reissueResult, "Reissue");
+                        Logger.MethodExit(LogLevel.Debug);
+                        return reissueResult;
+                    }
+
+                    Logger.LogWarning($"One click reissue is not available for product {productInfo.ProductID}; missing required enrollment parameters");
+                    flow.Fail("Reissue", "One click reissue is not available; missing Applicant Last Name");
+                    flow.EndBranch();
                     return new EnrollmentResult
                     {
                         Status = 30, //failure
                         StatusMessage =
                             "One click Renew Is Not Available for this Certificate Type.  Use the configure button instead."
                     };
-                }
+            }
 
-                Logger.LogTrace("Entering Reissue Enrollment");
-                //One click won't work for this implementation b/c we are missing enrollment params
-                if (productInfo.ProductParameters.ContainsKey("Applicant Last Name"))
-                {
-                    var requestid = await _certificateDataReader.GetRequestIDBySerialNumber(
-                        productInfo.ProductParameters["PriorCertSN"]);
-                    uUId = requestid.Substring(0, 36); //uUId is a GUID
-                    Logger.LogTrace($"Reissue uUId: {uUId}");
-                    reissueRequest = _requestManager.GetReissueRequest(productInfo, uUId, csr, san, customFields);
-                    Logger.LogTrace($"Reissue JSON: {JsonConvert.SerializeObject(reissueRequest)}");
-                    var reissueResponse = Task.Run(async () => await CscGlobalClient.SubmitReissueAsync(reissueRequest))
-                        .Result;
-                    Logger.LogTrace($"Reissue Response JSON: {JsonConvert.SerializeObject(reissueResponse)}");
-                    Logger.MethodExit(LogLevel.Debug);
-                    return _requestManager.GetReIssueResult(reissueResponse);
-                }
-
-                return new EnrollmentResult
-                {
-                    Status = 30, //failure
-                    StatusMessage =
-                        "One click Renew Is Not Available for this Certificate Type.  Use the configure button instead."
-                };
+            Logger.LogWarning($"Unhandled enrollment type {enrollmentType} for product {productInfo.ProductID}");
+            Logger.MethodExit(LogLevel.Debug);
+            return null;
         }
+        catch (Exception e)
+        {
+            Logger.LogError(e, $"Enroll failed for product {productInfo.ProductID}: {e.Message}");
+            flow.Fail("Enroll", e.Message);
+            throw;
+        }
+    }
 
-        Logger.MethodExit(LogLevel.Debug);
-        return null;
+    private void LogEnrollmentOutcome(EnrollmentResult result, string operationName)
+    {
+        if (result == null) return;
+        if (result.Status == (int)EndEntityStatus.FAILED)
+            Logger.LogError($"{operationName} failed: {result.StatusMessage}");
+        else
+            Logger.LogInformation($"{operationName} succeeded: {result.StatusMessage}");
     }
 
     //done
@@ -330,7 +486,7 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
         }
         catch (Exception e)
         {
-            Logger.LogError($"There was an error contacting CSCGlobal: {e.Message}.");
+            Logger.LogError(e, $"There was an error contacting CSCGlobal: {e.Message}.");
             throw new Exception($"Error attempting to ping CSCGlobal: {e.Message}.", e);
         }
 
@@ -340,19 +496,27 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
     //do
     public async Task ValidateCAConnectionInfo(Dictionary<string, object> connectionInfo)
     {
+        Logger.MethodEntry(LogLevel.Debug);
+        Logger.LogDebug($"Validating CA connection info with {connectionInfo?.Count ?? 0} entries");
+        Logger.MethodExit(LogLevel.Debug);
     }
 
     //do
     public async Task ValidateProductInfo(EnrollmentProductInfo productInfo,
         Dictionary<string, object> connectionInfo)
     {
+        Logger.MethodEntry(LogLevel.Debug);
         var certType = ProductIDs.productIds.Find(x =>
             x.Equals(productInfo.ProductID, StringComparison.InvariantCultureIgnoreCase));
 
-        if (certType == null) throw new ArgumentException($"Cannot find {productInfo.ProductID}", "ProductId");
+        if (certType == null)
+        {
+            Logger.LogError($"Cannot find product ID {productInfo.ProductID} in the list of supported CSC Global products");
+            throw new ArgumentException($"Cannot find {productInfo.ProductID}", "ProductId");
+        }
 
         Logger.LogInformation($"Validated {certType} ({certType})configured for AnyGateway");
-
+        Logger.MethodExit(LogLevel.Debug);
     }
 
     //done
