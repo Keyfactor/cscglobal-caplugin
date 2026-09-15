@@ -1,3 +1,6 @@
+v1.2.0
+- Added support for CSC TrustedSecure EV, Multiple Names; CSC TrustedSecure OV Wildcard, Multiple Names; and CSC TrustedSecure DV Wildcard, Multiple Names certificate products
+
 v.1.1.1
 - Added Incremental Sync that goes back X Number of days
 - Fixed issue with parsing certain certificates that were in zip format
