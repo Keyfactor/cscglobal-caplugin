@@ -35,8 +35,6 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
 
     private ICscGlobalClient CscGlobalClient { get; set; }
 
-    public bool EnableTemplateSync { get; set; }
-
     public int SyncFilterDays { get; set; }
 
     //done
@@ -46,12 +44,6 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
         if (configProvider == null) throw new ArgumentNullException(nameof(configProvider));
         _certificateDataReader = certificateDataReader ?? throw new ArgumentNullException(nameof(certificateDataReader));
         CscGlobalClient = new CscGlobalClient(configProvider);
-
-        if (configProvider.CAConnectionData.TryGetValue("TemplateSync", out var templateSyncValue) &&
-            templateSyncValue != null &&
-            string.Equals(templateSyncValue.ToString(), "ON", StringComparison.OrdinalIgnoreCase))
-            EnableTemplateSync = true;
-        Logger.LogInformation($"Template sync is {(EnableTemplateSync ? "enabled" : "disabled")}");
 
         if (configProvider.CAConnectionData.ContainsKey(Constants.SyncFilterDays))
         {
@@ -189,9 +181,7 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
             if (certStatus == Convert.ToInt32(EndEntityStatus.GENERATED) ||
                 certStatus == Convert.ToInt32(EndEntityStatus.REVOKED))
             {
-                //One click renewal/reissue won't work for this implementation so there is an option to disable it by not syncing back template
-                var productId = "CscGlobal";
-                if (EnableTemplateSync) productId = currentResponseItem?.CertificateType ?? productId;
+                var productId = currentResponseItem?.CertificateType ?? "CscGlobal";
 
                 var fileContent =
                     PreparePemTextFromApi(
@@ -551,13 +541,6 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
                 Hidden = false,
                 DefaultValue = "100",
                 Type = "String"
-            },
-            [Constants.TemplateSync] = new()
-            {
-                Comments = "Enable template sync.",
-                Hidden = false,
-                DefaultValue = "false",
-                Type = "Bool"
             },
             [Constants.SyncFilterDays] = new()
             {
