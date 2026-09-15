@@ -181,7 +181,7 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
             if (certStatus == Convert.ToInt32(EndEntityStatus.GENERATED) ||
                 certStatus == Convert.ToInt32(EndEntityStatus.REVOKED))
             {
-                var productId = currentResponseItem?.CertificateType ?? "CscGlobal";
+                var productId = currentResponseItem?.CertificateType;
 
                 var fileContent =
                     PreparePemTextFromApi(
@@ -194,7 +194,7 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
                     var certString = GetEndEntityCertificate(certData);
                     if (certString.Length > 0)
                     {
-                        Logger.LogTrace($"Queueing Certificate ID {currentResponseItem?.Uuid} with ProductID '{productId}'");
+                        Logger.LogTrace($"Queueing Certificate ID {currentResponseItem?.Uuid} with ProductID '{productId ?? "(null)"}'");
                         blockingBuffer.Add(new AnyCAPluginCertificate
                         {
                             CARequestID = $"{currentResponseItem?.Uuid}",
