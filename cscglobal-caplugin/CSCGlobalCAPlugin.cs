@@ -194,6 +194,7 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
                     var certString = GetEndEntityCertificate(certData);
                     if (certString.Length > 0)
                     {
+                        Logger.LogTrace($"Queueing Certificate ID {currentResponseItem?.Uuid} with ProductID '{productId}'");
                         blockingBuffer.Add(new AnyCAPluginCertificate
                         {
                             CARequestID = $"{currentResponseItem?.Uuid}",
