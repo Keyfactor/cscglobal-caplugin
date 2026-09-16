@@ -398,22 +398,27 @@ public class RequestManagerTests
     }
 
     [Fact]
-    public void GetRegistrationRequest_MultiNameEmailMethodNoAddtlEmailsConfigured_NoDcvMatch()
+    public void GetRegistrationRequest_MultiNameEmailMethodNoAddtlSanMatch_FallsBackToCommonNameDcvEmail()
     {
+        // CSC Global rejects the request if a SAN entry has no domainControlValidation, so a SAN
+        // domain with no matching "Addtl Sans" email must fall back to the primary CN's DCV email.
         var sans = new Dictionary<string, string[]> { ["dnsname"] = new[] { "www.example.com" } };
         var productInfo = ProductInfo("CSC TrustedSecure OV, Multiple Names", new Dictionary<string, string>
         {
-            ["Domain Control Validation Method"] = "EMAIL"
+            ["Domain Control Validation Method"] = "EMAIL",
+            ["CN DCV Email"] = "cn@example.com"
         });
 
         var request = Manager.GetRegistrationRequest(productInfo, SampleCsr, sans, new List<GetCustomField>());
 
         Assert.Single(request.SubjectAlternativeNames);
-        Assert.Null(request.SubjectAlternativeNames[0].DomainControlValidation);
+        var san = request.SubjectAlternativeNames[0];
+        Assert.NotNull(san.DomainControlValidation);
+        Assert.Equal("cn@example.com", san.DomainControlValidation.EmailAddress);
     }
 
     [Fact]
-    public void GetRegistrationRequest_MultiNameCnameMethod_UsesEmptyEmailValidation()
+    public void GetRegistrationRequest_MultiNameCnameMethod_MirrorsCommonNameDcv()
     {
         var sans = new Dictionary<string, string[]> { ["dnsname"] = new[] { "www.example.com" } };
         var productInfo = ProductInfo("CSC TrustedSecure OV, Multiple Names", new Dictionary<string, string>
@@ -426,6 +431,7 @@ public class RequestManagerTests
         Assert.Single(request.SubjectAlternativeNames);
         var san = request.SubjectAlternativeNames[0];
         Assert.NotNull(san.DomainControlValidation);
+        Assert.Equal("CNAME", san.DomainControlValidation.MethodType);
         Assert.Equal(string.Empty, san.DomainControlValidation.EmailAddress);
     }
 

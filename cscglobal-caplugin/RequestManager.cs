@@ -395,6 +395,7 @@ public class RequestManager
     {
         var subjectNameList = new List<SubjectAlternativeName>();
         var methodType = GetOptionalParam(productInfo, "Domain Control Validation Method");
+        var commonNameValidationEmail = GetOptionalParam(productInfo, "CN DCV Email");
 
         string[] dnsNames = null;
         sans?.TryGetValue("dnsname", out dnsNames);
@@ -409,10 +410,14 @@ public class RequestManager
                 var emailAddresses = string.IsNullOrWhiteSpace(addtlSansEmails)
                     ? Array.Empty<string>()
                     : addtlSansEmails.Split(',');
-                san.DomainControlValidation = GetDomainControlValidation(methodType, emailAddresses, domainName);
+
+                // Fall back to the primary CN's DCV email when no per-domain override matches;
+                // CSC Global rejects the request if a SAN entry is missing domainControlValidation.
+                san.DomainControlValidation = GetDomainControlValidation(methodType, emailAddresses, domainName)
+                    ?? GetDomainControlValidation(methodType, commonNameValidationEmail);
             }
-            else //it is a CNAME validation so no email is needed
-                san.DomainControlValidation = GetDomainControlValidation(methodType, "");
+            else //it is a CNAME validation - mirror the primary CN's DCV, no email is needed
+                san.DomainControlValidation = GetDomainControlValidation(methodType, commonNameValidationEmail);
 
             subjectNameList.Add(san);
         }
