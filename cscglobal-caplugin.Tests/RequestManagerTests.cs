@@ -294,6 +294,14 @@ public class RequestManagerTests
     [InlineData("CSC TrustedSecure OV Wildcard, Multiple Names", "8", true, false)]
     [InlineData("CSC TrustedSecure DV Wildcard, Multiple Names", "9", true, false)]
     [InlineData("Some Unknown Product", "-1", false, false)]
+    // Legacy (pre-1.2.0) product names, kept as aliases for backward compatibility.
+    [InlineData("CSC TrustedSecure Premium Certificate", "0", false, false)]
+    [InlineData("CSC TrustedSecure Premium Wildcard Certificate", "1", false, false)]
+    [InlineData("CSC TrustedSecure UC Certificate", "2", true, false)]
+    [InlineData("CSC TrustedSecure EV Certificate", "3", false, true)]
+    [InlineData("CSC TrustedSecure Domain Validated SSL", "4", false, false)]
+    [InlineData("CSC TrustedSecure Domain Validated Wildcard SSL", "5", false, false)]
+    [InlineData("CSC TrustedSecure Domain Validated UC Certificate", "6", true, false)]
     public void GetRegistrationRequest_RoutesCertificateTypeAndOptionalSections(
         string productId, string expectedType, bool expectSans, bool expectEv)
     {

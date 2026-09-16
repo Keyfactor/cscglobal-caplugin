@@ -306,6 +306,11 @@ public class RequestManager
 
     private string GetCertificateType(string productId)
     {
+        if (productId != null && ProductIDs.legacyProductIdAliases.TryGetValue(productId, out var canonicalProductId))
+        {
+            productId = canonicalProductId;
+        }
+
         switch (productId)
         {
             case "CSC TrustedSecure OV":

@@ -1,6 +1,6 @@
 v1.2.0
 - Added support for CSC TrustedSecure EV, Multiple Names; CSC TrustedSecure OV Wildcard, Multiple Names; and CSC TrustedSecure DV Wildcard, Multiple Names certificate products
-- BREAKING: Renamed all certificate template product IDs to match CSC's current certificate type names (e.g. "CSC TrustedSecure Premium Certificate" is now "CSC TrustedSecure OV", "CSC TrustedSecure Domain Validated SSL" is now "CSC TrustedSecure DV"). Existing Certificate Templates in Command must have their Template Short Name updated to match.
+- Renamed all certificate template product IDs to match CSC's current certificate type names (e.g. "CSC TrustedSecure Premium Certificate" is now "CSC TrustedSecure OV", "CSC TrustedSecure Domain Validated SSL" is now "CSC TrustedSecure DV"). Existing Certificate Templates in Command using the old names continue to work; new Templates should use the new names.
 - Removed the TemplateSync gateway registration setting. Certificate sync now always maps synced certificates back to their CSC certificate type/template.
 - Added .NET 10 as a supported target framework, alongside .NET 6 and .NET 8.
 

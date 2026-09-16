@@ -31,6 +31,20 @@ public class ProductIDs
         "CSC TrustedSecure OV Wildcard, Multiple Names",
         "CSC TrustedSecure DV Wildcard, Multiple Names"
     };
+
+    // Pre-1.2.0 template names. Existing Certificate Templates in Command may still
+    // reference these, so they're accepted as aliases for their canonical replacement.
+    public static Dictionary<string, string> legacyProductIdAliases =
+        new(StringComparer.InvariantCultureIgnoreCase)
+        {
+            ["CSC TrustedSecure Premium Certificate"] = "CSC TrustedSecure OV",
+            ["CSC TrustedSecure Premium Wildcard Certificate"] = "CSC TrustedSecure OV Wildcard",
+            ["CSC TrustedSecure UC Certificate"] = "CSC TrustedSecure OV, Multiple Names",
+            ["CSC TrustedSecure EV Certificate"] = "CSC TrustedSecure EV",
+            ["CSC TrustedSecure Domain Validated SSL"] = "CSC TrustedSecure DV",
+            ["CSC TrustedSecure Domain Validated Wildcard SSL"] = "CSC TrustedSecure DV Wildcard",
+            ["CSC TrustedSecure Domain Validated UC Certificate"] = "CSC TrustedSecure DV, Multiple Names"
+        };
 }
 
 public class EnrollmentConfigConstants

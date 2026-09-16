@@ -726,6 +726,13 @@ public class CSCGlobalCAPluginTests
             plugin.ValidateProductInfo(ProductInfo("Not A Real Product"), new Dictionary<string, object>()));
     }
 
+    [Fact]
+    public async Task ValidateProductInfo_LegacyProductName_DoesNotThrow()
+    {
+        var plugin = MakePlugin();
+        await plugin.ValidateProductInfo(ProductInfo("CSC TrustedSecure UC Certificate"), new Dictionary<string, object>());
+    }
+
     // ---------------------------------------------------------------------
     // GetCAConnectorAnnotations / GetTemplateParameterAnnotations / GetProductIds
     // ---------------------------------------------------------------------
@@ -849,7 +856,7 @@ public class CSCGlobalCAPluginTests
         using var rsaLeaf = RSA.Create(2048);
         var leafReq = new CertificateRequest("CN=leaf.example.com", rsaLeaf, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
         leafReq.CertificateExtensions.Add(new X509BasicConstraintsExtension(false, false, 0, true));
-        var leafCert = leafReq.Create(caCert, DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(365),
+        var leafCert = leafReq.Create(caCert, DateTimeOffset.UtcNow.AddDays(-1), caCert.NotAfter.AddDays(-1),
             Guid.NewGuid().ToByteArray());
 
         string ToPemBlock(X509Certificate2 c) => "-----BEGIN CERTIFICATE-----\n" +

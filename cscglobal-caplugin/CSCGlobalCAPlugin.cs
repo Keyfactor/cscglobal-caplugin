@@ -505,13 +505,16 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
         var certType = ProductIDs.productIds.Find(x =>
             x.Equals(productInfo.ProductID, StringComparison.InvariantCultureIgnoreCase));
 
-        if (certType == null)
+        var isLegacyProductId = certType == null && productInfo.ProductID != null &&
+            ProductIDs.legacyProductIdAliases.ContainsKey(productInfo.ProductID);
+
+        if (certType == null && !isLegacyProductId)
         {
             Logger.LogError($"Cannot find product ID {productInfo.ProductID} in the list of supported CSC Global products");
             throw new ArgumentException($"Cannot find {productInfo.ProductID}", "ProductId");
         }
 
-        Logger.LogInformation($"Validated {certType} ({certType})configured for AnyGateway");
+        Logger.LogInformation($"Validated product ID '{productInfo.ProductID}' configured for AnyGateway");
         Logger.MethodExit(LogLevel.Debug);
     }
 
