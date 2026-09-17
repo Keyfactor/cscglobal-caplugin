@@ -103,7 +103,7 @@ public class CscGlobalClientTests
         Assert.NotNull(response.Result);
         Assert.Equal("order-1", response.Result.CommonName);
         Assert.Equal("USD", response.Result.Price.Currency);
-        Assert.Equal(99.5m, response.Result.Price.Total);
+        Assert.Equal(99.5m, response.Result.Price.Total!.Value);
         Assert.Equal("example.com", response.Result.DcvDetails[0].DomainName);
         Assert.Equal("N", response.Result.DcvDetails[0].ActionNeeded);
         Assert.Contains("/dbs/api/v2/tls/registration", handler.LastRequest!.RequestUri!.ToString());
@@ -194,6 +194,22 @@ public class CscGlobalClientTests
 
         Assert.Equal("reissue-1", response.Result.CommonName);
         Assert.Contains("/dbs/api/v2/tls/reissue", handler.LastRequest!.RequestUri!.ToString());
+    }
+
+    [Fact]
+    public async Task SubmitReissueAsync_NullPriceTotal_DoesNotThrow()
+    {
+        // Real CSC Global response observed in production: "price.total" comes back null
+        // for a reissue where the certificate is not in a reissuable status. Price.Total
+        // must be nullable or this throws a JsonSerializationException instead of letting
+        // the caller see the RegistrationError/order status.
+        var client = MakeClient(_ => JsonResponse(HttpStatusCode.OK,
+            "{\"result\":{\"commonName\":\"reissue-2\",\"price\":{\"currency\":\"USD\",\"total\":null}}}"), out _);
+
+        var response = await client.SubmitReissueAsync(new ReissueRequest());
+
+        Assert.Equal("reissue-2", response.Result.CommonName);
+        Assert.Null(response.Result.Price.Total);
     }
 
     [Fact]
