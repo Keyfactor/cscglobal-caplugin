@@ -460,14 +460,16 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
         }
         catch (Exception e)
         {
-            var detail = LogHandler.FlattenException(e);
-            Logger.LogError(e, $"Enroll failed for product {productInfo.ProductID}: {detail}");
-            flow.Fail("Enroll", detail);
+            // Log the full exception (with stack trace) for diagnostics, but keep the
+            // user-facing StatusMessage to just the exception's message - the flow summary
+            // already shows which step failed, so the stack trace would only add noise.
+            Logger.LogError(e, $"Enroll failed for product {productInfo.ProductID}: {LogHandler.FlattenException(e)}");
+            flow.Fail("Enroll", e.Message);
             Logger.MethodExit(LogLevel.Debug);
             return new EnrollmentResult
             {
                 Status = (int)EndEntityStatus.FAILED,
-                StatusMessage = $"{flow.GetSummary()}\n\nEnrollment failed: {detail}"
+                StatusMessage = $"{flow.GetSummary()}\n\nEnrollment failed: {e.Message}"
             };
         }
     }
