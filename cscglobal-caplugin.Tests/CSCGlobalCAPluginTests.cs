@@ -530,7 +530,7 @@ public class CSCGlobalCAPluginTests
         var result = await plugin.Enroll("csr", "CN=test", new Dictionary<string, string[]>(), productInfo,
             RequestFormat.PKCS10, EnrollmentType.RenewOrReissue);
 
-        Assert.Equal((int)EndEntityStatus.GENERATED, result!.Status);
+        Assert.Equal((int)EndEntityStatus.EXTERNALVALIDATION, result!.Status);
         mockClient.Verify(c => c.SubmitReissueAsync(It.IsAny<ReissueRequest>()), Times.Once);
     }
 
@@ -559,7 +559,7 @@ public class CSCGlobalCAPluginTests
         var result = await plugin.Enroll("csr", "CN=test", new Dictionary<string, string[]>(), productInfo,
             RequestFormat.PKCS10, EnrollmentType.RenewOrReissue);
 
-        Assert.Equal((int)EndEntityStatus.GENERATED, result!.Status);
+        Assert.Equal((int)EndEntityStatus.EXTERNALVALIDATION, result!.Status);
     }
 
     [Fact]
@@ -608,7 +608,7 @@ public class CSCGlobalCAPluginTests
         var result = await plugin.Enroll("csr", "CN=test", new Dictionary<string, string[]>(), productInfo,
             RequestFormat.PKCS10, EnrollmentType.RenewOrReissue);
 
-        Assert.Equal((int)EndEntityStatus.GENERATED, result!.Status);
+        Assert.Equal((int)EndEntityStatus.EXTERNALVALIDATION, result!.Status);
     }
 
     [Fact]

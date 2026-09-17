@@ -60,12 +60,39 @@ public class RequestManagerTests
     }
 
     [Fact]
-    public void GetRenewResponse_Success_ReturnsGenerated()
+    public void GetRenewResponse_Success_ReturnsExternalValidation()
     {
-        var response = new RenewalResponse { Result = new Result { CommonName = "renewed.example.com" } };
+        // CSC Global never returns an issued certificate on the renewal response itself - it
+        // still needs DCV, so this must not claim GENERATED (Command would then try to parse
+        // a certificate off a result that doesn't have one).
+        var response = new RenewalResponse
+        {
+            Result = new Result { CommonName = "renewed.example.com", Status = new Status { Uuid = "uuid-renew" } }
+        };
         var result = Manager.GetRenewResponse(response);
-        Assert.Equal((int)EndEntityStatus.GENERATED, result.Status);
+        Assert.Equal((int)EndEntityStatus.EXTERNALVALIDATION, result.Status);
+        Assert.Equal("uuid-renew", result.CARequestID);
         Assert.Contains("renewed.example.com", result.StatusMessage);
+    }
+
+    [Fact]
+    public void GetRenewResponse_Success_WithDcvDetails_PopulatesEnrollmentContext()
+    {
+        var response = new RenewalResponse
+        {
+            Result = new Result
+            {
+                CommonName = "renewed.example.com",
+                Status = new Status { Uuid = "uuid-renew" },
+                DcvDetails = new List<DcvDetail>
+                {
+                    new DcvDetail { CName = new CName { Name = "_dnsauth.example.com", Value = "token" } }
+                }
+            }
+        };
+        var result = Manager.GetRenewResponse(response);
+        Assert.NotNull(result.EnrollmentContext);
+        Assert.Equal("token", result.EnrollmentContext["_dnsauth.example.com"]);
     }
 
     // ---------------------------------------------------------------------
@@ -231,15 +258,34 @@ public class RequestManagerTests
     }
 
     [Fact]
-    public void GetReIssueResult_Success_ReturnsGenerated()
+    public void GetReIssueResult_Success_ReturnsExternalValidation()
     {
+        // Same as renewal - CSC Global still requires DCV before actually issuing the
+        // certificate, so a reissue submission must not claim GENERATED either.
         var response = new ReissueResponse
         {
             Result = new Result { CommonName = "reissued.example.com", Status = new Status { Uuid = "uuid-3" } }
         };
         var result = Manager.GetReIssueResult(response);
-        Assert.Equal((int)EndEntityStatus.GENERATED, result.Status);
+        Assert.Equal((int)EndEntityStatus.EXTERNALVALIDATION, result.Status);
         Assert.Equal("uuid-3", result.CARequestID);
+    }
+
+    [Fact]
+    public void GetReIssueResult_Success_WithDcvDetails_PopulatesEnrollmentContext()
+    {
+        var response = new ReissueResponse
+        {
+            Result = new Result
+            {
+                CommonName = "reissued.example.com",
+                Status = new Status { Uuid = "uuid-3" },
+                DcvDetails = new List<DcvDetail> { new DcvDetail { Email = "admin@example.com" } }
+            }
+        };
+        var result = Manager.GetReIssueResult(response);
+        Assert.NotNull(result.EnrollmentContext);
+        Assert.Equal("admin@example.com", result.EnrollmentContext["admin@example.com"]);
     }
 
     // ---------------------------------------------------------------------

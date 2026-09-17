@@ -94,13 +94,43 @@ public class RequestManager
             };
         }
 
-        Logger.LogInformation($"Renewal successfully completed for {renewResponse.Result.CommonName}");
+        // CSC Global never returns an issued certificate on the renewal response itself - the
+        // renewal is only submitted here and still needs domain control validation (email
+        // confirmation or a CNAME record) before CSC actually issues the certificate. The real
+        // certificate is picked up later via Synchronize. Reporting GENERATED here tells Command
+        // a certificate is ready to be parsed off this result when there isn't one.
+        Logger.LogInformation($"Renewal successfully submitted for {renewResponse.Result.CommonName}");
         return new EnrollmentResult
         {
-            Status = (int)EndEntityStatus.GENERATED, //success
-
-            StatusMessage = $"Renewal Successfully Completed For {renewResponse.Result.CommonName}"
+            Status = (int)EndEntityStatus.EXTERNALVALIDATION, //success - pending DCV, not yet issued
+            CARequestID = renewResponse.Result.Status?.Uuid,
+            StatusMessage = $"Renewal Successfully Submitted For {renewResponse.Result.CommonName}",
+            EnrollmentContext = BuildDcvEnrollmentContext(renewResponse.Result.DcvDetails)
         };
+    }
+
+    // Builds the CNAME/email DCV instructions CSC Global returns on a submitted order into the
+    // key/value context Command surfaces to the requester, so they know what action is needed
+    // (create a CNAME record, or check their email) before the certificate will actually issue.
+    private static Dictionary<string, string> BuildDcvEnrollmentContext(List<DcvDetail> dcvDetails)
+    {
+        var cnames = new Dictionary<string, string>();
+        if (dcvDetails == null) return null;
+
+        foreach (var dcv in dcvDetails)
+        {
+            if (dcv.CName != null && !string.IsNullOrEmpty(dcv.CName.Name) && !string.IsNullOrEmpty(dcv.CName.Value))
+            {
+                cnames.Add(dcv.CName.Name, dcv.CName.Value);
+            }
+
+            if (!string.IsNullOrEmpty(dcv.Email) && !cnames.ContainsKey(dcv.Email))
+            {
+                cnames.Add(dcv.Email, dcv.Email);
+            }
+        }
+
+        return cnames.Count > 0 ? cnames : null;
     }
 
 
@@ -138,21 +168,6 @@ public class RequestManager
             };
         }
 
-        var cnames = new Dictionary<string, string>();
-        if (registrationResponse.Result.DcvDetails != null && registrationResponse.Result.DcvDetails.Count > 0)
-            foreach (var dcv in registrationResponse.Result.DcvDetails)
-            {
-                if (dcv.CName != null && !string.IsNullOrEmpty(dcv.CName.Name) && !string.IsNullOrEmpty(dcv.CName.Value))
-                {
-                    cnames.Add(dcv.CName.Name, dcv.CName.Value);
-                }
-
-                if (!string.IsNullOrEmpty(dcv.Email) && !cnames.ContainsKey(dcv.Email))
-                {
-                    cnames.Add(dcv.Email, dcv.Email);
-                }
-            }
-        
         Logger.LogInformation($"Order successfully created with order number {registrationResponse.Result.CommonName}");
         return new EnrollmentResult
         {
@@ -160,7 +175,7 @@ public class RequestManager
             CARequestID = registrationResponse.Result.Status?.Uuid,
             StatusMessage =
                 $"Order Successfully Created With Order Number {registrationResponse.Result.CommonName}",
-            EnrollmentContext = cnames.Count > 0 ? cnames : null
+            EnrollmentContext = BuildDcvEnrollmentContext(registrationResponse.Result.DcvDetails)
         };
     }
 
@@ -213,12 +228,15 @@ public class RequestManager
             };
         }
 
-        Logger.LogInformation($"Reissue successfully completed for {reissueResponse.Result.CommonName}");
+        // Same as renewal: CSC Global submits the reissue but still requires DCV before the
+        // certificate is actually issued, so this must not claim GENERATED here.
+        Logger.LogInformation($"Reissue successfully submitted for {reissueResponse.Result.CommonName}");
         return new EnrollmentResult
         {
-            Status = (int)EndEntityStatus.GENERATED, //success
+            Status = (int)EndEntityStatus.EXTERNALVALIDATION, //success - pending DCV, not yet issued
             CARequestID = reissueResponse.Result.Status?.Uuid,
-            StatusMessage = $"Reissue Successfully Completed For {reissueResponse.Result.CommonName}"
+            StatusMessage = $"Reissue Successfully Submitted For {reissueResponse.Result.CommonName}",
+            EnrollmentContext = BuildDcvEnrollmentContext(reissueResponse.Result.DcvDetails)
         };
     }
 
