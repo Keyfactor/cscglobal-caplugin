@@ -1,3 +1,10 @@
+v1.2.0
+- Added support for CSC TrustedSecure EV, Multiple Names; CSC TrustedSecure OV Wildcard, Multiple Names; and CSC TrustedSecure DV Wildcard, Multiple Names certificate products
+- Renamed all certificate template product IDs to match CSC's current certificate type names (e.g. "CSC TrustedSecure Premium Certificate" is now "CSC TrustedSecure OV", "CSC TrustedSecure Domain Validated SSL" is now "CSC TrustedSecure DV"). Existing Certificate Templates in Command using the old names continue to work; new Templates should use the new names.
+- Removed the TemplateSync gateway registration setting. Certificate sync now always maps synced certificates back to their CSC certificate type/template.
+- Added .NET 10 as a supported target framework, alongside .NET 6 and .NET 8.
+- Enrollment/renewal/reissue failures now include the FlowLogger step-by-step summary ahead of the underlying error message in StatusMessage, instead of just a terse error. Also fixed enrollment failures reporting Status 30 (INPROCESS) instead of the correct FAILED status, and an exception thrown mid-enrollment no longer bubbles up as an unhandled error - it's now returned as a proper failed EnrollmentResult with full flow context.
+
 v.1.1.1
 - Added Incremental Sync that goes back X Number of days
 - Fixed issue with parsing certain certificates that were in zip format
