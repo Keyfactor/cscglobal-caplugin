@@ -448,7 +448,8 @@ public class CSCGlobalCAPluginTests
             RequestFormat.PKCS10, EnrollmentType.New);
 
         Assert.Equal((int)EndEntityStatus.FAILED, result!.Status);
-        Assert.Equal("duplicate order", result.StatusMessage);
+        Assert.Contains("Flow: Enroll", result.StatusMessage);
+        Assert.Contains("duplicate order", result.StatusMessage);
     }
 
     [Fact]
@@ -462,7 +463,7 @@ public class CSCGlobalCAPluginTests
 
         var result = await plugin.Enroll("csr", "CN=test", new Dictionary<string, string[]>(), productInfo, RequestFormat.PKCS10, EnrollmentType.New);
 
-        Assert.Equal((int)EndEntityStatus.INPROCESS, result!.Status);
+        Assert.Equal((int)EndEntityStatus.FAILED, result!.Status);
         mockClient.Verify(c => c.SubmitRegistrationAsync(It.IsAny<RegistrationRequest>()), Times.Never);
     }
 
@@ -476,7 +477,7 @@ public class CSCGlobalCAPluginTests
         var result = await plugin.Enroll("csr", "CN=test", new Dictionary<string, string[]>(), ProductInfo(),
             RequestFormat.PKCS10, EnrollmentType.RenewOrReissue);
 
-        Assert.Equal((int)EndEntityStatus.INPROCESS, result!.Status);
+        Assert.Equal((int)EndEntityStatus.FAILED, result!.Status);
         Assert.Contains("no prior certificate serial number", result.StatusMessage);
     }
 
@@ -494,7 +495,7 @@ public class CSCGlobalCAPluginTests
         var result = await plugin.Enroll("csr", "CN=test", new Dictionary<string, string[]>(), productInfo,
             RequestFormat.PKCS10, EnrollmentType.RenewOrReissue);
 
-        Assert.Equal((int)EndEntityStatus.INPROCESS, result!.Status);
+        Assert.Equal((int)EndEntityStatus.FAILED, result!.Status);
         Assert.Contains("no prior request found", result.StatusMessage);
     }
 
@@ -578,7 +579,7 @@ public class CSCGlobalCAPluginTests
         var result = await plugin.Enroll("csr", "CN=test", new Dictionary<string, string[]>(), productInfo,
             RequestFormat.PKCS10, EnrollmentType.RenewOrReissue);
 
-        Assert.Equal((int)EndEntityStatus.INPROCESS, result!.Status);
+        Assert.Equal((int)EndEntityStatus.FAILED, result!.Status);
         Assert.Contains("One click Renew Is Not Available", result.StatusMessage);
     }
 
@@ -627,8 +628,8 @@ public class CSCGlobalCAPluginTests
         var result = await plugin.Enroll("csr", "CN=test", new Dictionary<string, string[]>(), productInfo,
             RequestFormat.PKCS10, EnrollmentType.RenewOrReissue);
 
-        Assert.Equal((int)EndEntityStatus.INPROCESS, result!.Status);
-        Assert.Contains("One click Renew Is Not Available", result.StatusMessage);
+        Assert.Equal((int)EndEntityStatus.FAILED, result!.Status);
+        Assert.Contains("One click Reissue Is Not Available", result.StatusMessage);
     }
 
     [Fact]
@@ -651,7 +652,7 @@ public class CSCGlobalCAPluginTests
         var result = await plugin.Enroll("csr", "CN=test", new Dictionary<string, string[]>(), productInfo,
             RequestFormat.PKCS10, EnrollmentType.RenewOrReissue);
 
-        Assert.Equal((int)EndEntityStatus.INPROCESS, result!.Status);
+        Assert.Equal((int)EndEntityStatus.FAILED, result!.Status);
         Assert.Contains("no prior request found", result.StatusMessage);
     }
 
@@ -669,14 +670,18 @@ public class CSCGlobalCAPluginTests
     }
 
     [Fact]
-    public async Task Enroll_ClientThrows_Rethrows()
+    public async Task Enroll_ClientThrows_ReturnsFailureWithFlowSummaryAndErrorDetail()
     {
         var mockClient = new Mock<ICscGlobalClient>();
         mockClient.Setup(c => c.SubmitGetCustomFields()).ThrowsAsync(new InvalidOperationException("boom"));
 
         var plugin = MakePlugin(mockClient);
-        await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            plugin.Enroll("csr", "CN=test", new Dictionary<string, string[]>(), ProductInfo(), RequestFormat.PKCS10, EnrollmentType.New));
+        var result = await plugin.Enroll("csr", "CN=test", new Dictionary<string, string[]>(), ProductInfo(), RequestFormat.PKCS10, EnrollmentType.New);
+
+        Assert.Equal((int)EndEntityStatus.FAILED, result!.Status);
+        Assert.Contains("Flow: Enroll", result.StatusMessage);
+        Assert.Contains("SubmitGetCustomFields", result.StatusMessage);
+        Assert.Contains("boom", result.StatusMessage);
     }
 
     // ---------------------------------------------------------------------

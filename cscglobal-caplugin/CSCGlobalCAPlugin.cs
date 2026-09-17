@@ -326,13 +326,14 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
                         flow.EndBranch();
                         return new EnrollmentResult
                         {
-                            Status = 30, //failure
-                            StatusMessage = "You cannot renew an expired cert please perform an new enrollment."
+                            Status = (int)EndEntityStatus.FAILED,
+                            StatusMessage = $"{flow.GetSummary()}\n\nYou cannot renew an expired cert please perform an new enrollment."
                         };
                     }
 
                     flow.EndBranch();
                     var newResult = _requestManager.GetEnrollmentResult(enrollmentResponse);
+                    EnrichFailureWithFlowSummary(newResult, flow);
                     LogEnrollmentOutcome(newResult, "New Enrollment");
                     Logger.MethodExit(LogLevel.Debug);
                     return newResult;
@@ -345,8 +346,8 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
                         flow.EndBranch();
                         return new EnrollmentResult
                         {
-                            Status = 30, //failure
-                            StatusMessage = "Cannot renew or reissue: no prior certificate serial number was supplied."
+                            Status = (int)EndEntityStatus.FAILED,
+                            StatusMessage = $"{flow.GetSummary()}\n\nCannot renew or reissue: no prior certificate serial number was supplied."
                         };
                     }
 
@@ -360,8 +361,8 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
                         flow.EndBranch();
                         return new EnrollmentResult
                         {
-                            Status = 30, //failure
-                            StatusMessage = $"Cannot renew or reissue: no prior request found for serial number {priorSn}."
+                            Status = (int)EndEntityStatus.FAILED,
+                            StatusMessage = $"{flow.GetSummary()}\n\nCannot renew or reissue: no prior request found for serial number {priorSn}."
                         };
                     }
 
@@ -392,6 +393,7 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
                             Logger.LogTrace($"Renewal Response JSON: {JsonConvert.SerializeObject(renewResponse)}");
                             flow.EndBranch();
                             var renewResult = _requestManager.GetRenewResponse(renewResponse);
+                            EnrichFailureWithFlowSummary(renewResult, flow);
                             LogEnrollmentOutcome(renewResult, "Renewal");
                             Logger.MethodExit(LogLevel.Debug);
                             return renewResult;
@@ -402,9 +404,9 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
                         flow.EndBranch();
                         return new EnrollmentResult
                         {
-                            Status = 30, //failure
+                            Status = (int)EndEntityStatus.FAILED,
                             StatusMessage =
-                                "One click Renew Is Not Available for this Certificate Type.  Use the configure button instead."
+                                $"{flow.GetSummary()}\n\nOne click Renew Is Not Available for this Certificate Type.  Use the configure button instead."
                         };
                     }
 
@@ -421,8 +423,8 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
                             flow.EndBranch();
                             return new EnrollmentResult
                             {
-                                Status = 30, //failure
-                                StatusMessage = "Cannot reissue: no prior request found for the supplied certificate serial number."
+                                Status = (int)EndEntityStatus.FAILED,
+                                StatusMessage = $"{flow.GetSummary()}\n\nCannot reissue: no prior request found for the supplied certificate serial number."
                             };
                         }
 
@@ -435,6 +437,7 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
                         Logger.LogTrace($"Reissue Response JSON: {JsonConvert.SerializeObject(reissueResponse)}");
                         flow.EndBranch();
                         var reissueResult = _requestManager.GetReIssueResult(reissueResponse);
+                        EnrichFailureWithFlowSummary(reissueResult, flow);
                         LogEnrollmentOutcome(reissueResult, "Reissue");
                         Logger.MethodExit(LogLevel.Debug);
                         return reissueResult;
@@ -445,9 +448,9 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
                     flow.EndBranch();
                     return new EnrollmentResult
                     {
-                        Status = 30, //failure
+                        Status = (int)EndEntityStatus.FAILED,
                         StatusMessage =
-                            "One click Renew Is Not Available for this Certificate Type.  Use the configure button instead."
+                            $"{flow.GetSummary()}\n\nOne click Reissue Is Not Available for this Certificate Type.  Use the configure button instead."
                     };
             }
 
@@ -457,9 +460,15 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
         }
         catch (Exception e)
         {
-            Logger.LogError(e, $"Enroll failed for product {productInfo.ProductID}: {e.Message}");
-            flow.Fail("Enroll", e.Message);
-            throw;
+            var detail = LogHandler.FlattenException(e);
+            Logger.LogError(e, $"Enroll failed for product {productInfo.ProductID}: {detail}");
+            flow.Fail("Enroll", detail);
+            Logger.MethodExit(LogLevel.Debug);
+            return new EnrollmentResult
+            {
+                Status = (int)EndEntityStatus.FAILED,
+                StatusMessage = $"{flow.GetSummary()}\n\nEnrollment failed: {detail}"
+            };
         }
     }
 
@@ -470,6 +479,16 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
             Logger.LogError($"{operationName} failed: {result.StatusMessage}");
         else
             Logger.LogInformation($"{operationName} succeeded: {result.StatusMessage}");
+    }
+
+    // CSC Global business-level failures (e.g. "Open order in progress") come back from
+    // RequestManager as a terse StatusMessage with no context on what the plugin actually did
+    // before hitting that error. Prepend the flow's step-by-step summary so the message shown
+    // to the requester in Command explains what ran, not just how it ended.
+    private static void EnrichFailureWithFlowSummary(EnrollmentResult result, FlowLogger flow)
+    {
+        if (result?.Status == (int)EndEntityStatus.FAILED)
+            result.StatusMessage = $"{flow.GetSummary()}\n\n{result.StatusMessage}";
     }
 
     //done
