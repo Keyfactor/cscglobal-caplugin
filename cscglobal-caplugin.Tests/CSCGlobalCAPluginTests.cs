@@ -612,6 +612,40 @@ public class CSCGlobalCAPluginTests
     }
 
     [Fact]
+    public async Task Enroll_Reissue_LegacyProductName_SendsResolvedCertificateType()
+    {
+        // Full end-to-end proof that a Certificate Template still configured with a
+        // pre-1.2.0 product name reissues correctly against the current extension.
+        var uuid = Guid.NewGuid().ToString();
+        ReissueRequest capturedRequest = null!;
+        var mockClient = new Mock<ICscGlobalClient>();
+        mockClient.Setup(c => c.SubmitGetCustomFields()).ReturnsAsync(new List<GetCustomField>());
+        mockClient.Setup(c => c.SubmitReissueAsync(It.IsAny<ReissueRequest>()))
+            .Callback<ReissueRequest>(r => capturedRequest = r)
+            .ReturnsAsync(new ReissueResponse
+            {
+                Result = new Result { CommonName = "reissued.example.com", Status = new Status { Uuid = uuid } }
+            });
+
+        var certDataReader = new Mock<ICertificateDataReader>();
+        certDataReader.Setup(r => r.GetRequestIDBySerialNumber("ABC123")).ReturnsAsync(uuid);
+        certDataReader.Setup(r => r.GetExpirationDateByRequestId(uuid)).Returns(DateTime.Now.AddDays(30));
+
+        var plugin = MakePlugin(mockClient, certDataReader);
+        var productInfo = ProductInfo("CSC TrustedSecure UC Certificate", new Dictionary<string, string>
+        {
+            ["PriorCertSN"] = "ABC123",
+            ["Applicant Last Name"] = "Doe"
+        });
+
+        var result = await plugin.Enroll("csr", "CN=test", new Dictionary<string, string[]>(), productInfo,
+            RequestFormat.PKCS10, EnrollmentType.RenewOrReissue);
+
+        Assert.Equal((int)EndEntityStatus.EXTERNALVALIDATION, result!.Status);
+        Assert.Equal("2", capturedRequest.CertificateType);
+    }
+
+    [Fact]
     public async Task Enroll_Reissue_MissingApplicantLastName_ReturnsFailure()
     {
         var uuid = Guid.NewGuid().ToString();

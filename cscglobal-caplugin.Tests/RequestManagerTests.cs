@@ -594,6 +594,23 @@ public class RequestManagerTests
     }
 
     [Fact]
+    public void GetRenewalRequest_LegacyProductName_ResolvesCertificateTypeAndSans()
+    {
+        // A Certificate Template in Command created before the 1.2.0 rename still carries the
+        // old product name; renewals against it must resolve the same as the canonical name.
+        var sans = new Dictionary<string, string[]> { ["dnsname"] = new[] { "www.example.com" } };
+        var productInfo = ProductInfo("CSC TrustedSecure Domain Validated UC Certificate", new Dictionary<string, string>
+        {
+            ["Domain Control Validation Method"] = "CNAME"
+        });
+
+        var request = Manager.GetRenewalRequest(productInfo, "uuid-legacy", SampleCsr, sans, new List<GetCustomField>());
+
+        Assert.Equal("6", request.CertificateType);
+        Assert.Single(request.SubjectAlternativeNames);
+    }
+
+    [Fact]
     public void GetRenewalRequest_EvProduct_PopulatesEvDetailsNoSans()
     {
         var productInfo = ProductInfo("CSC TrustedSecure EV", new Dictionary<string, string>
@@ -623,6 +640,21 @@ public class RequestManagerTests
         Assert.Equal("uuid-789", request.Uuid);
         Assert.Equal("8", request.CertificateType);
         Assert.Single(request.SubjectAlternativeNames);
+    }
+
+    [Fact]
+    public void GetReissueRequest_LegacyProductName_ResolvesCertificateType()
+    {
+        var productInfo = ProductInfo("CSC TrustedSecure EV Certificate", new Dictionary<string, string>
+        {
+            ["Organization Country"] = "US"
+        });
+
+        var request = Manager.GetReissueRequest(productInfo, "uuid-legacy-2", SampleCsr,
+            new Dictionary<string, string[]>(), new List<GetCustomField>());
+
+        Assert.Equal("3", request.CertificateType);
+        Assert.NotNull(request.EvCertificateDetails);
     }
 
     [Fact]
