@@ -488,7 +488,7 @@ public class RequestManager
 
     public int MapReturnStatus(string cscGlobalStatus)
     {
-        var returnStatus = 0;
+        int returnStatus;
 
         switch (cscGlobalStatus)
         {
