@@ -5,6 +5,8 @@ VisualStudioVersion = 18.0.11217.181 d18.0
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CSCGlobalCAPlugin", "cscglobal-caplugin\CSCGlobalCAPlugin.csproj", "{01DDFD6F-275D-46E7-B522-E0C965D1BF9C}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CSCGlobalCAPlugin.Tests", "cscglobal-caplugin.Tests\CSCGlobalCAPlugin.Tests.csproj", "{7B2A5E3C-9F4D-4A1B-8C6E-1D3F5A7B9C0D}"
+EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{8EC462FD-D22E-90A8-E5CE-7E832BA40C5D}"
 	ProjectSection(SolutionItems) = preProject
 		CHANGELOG.md = CHANGELOG.md
@@ -25,6 +27,12 @@ Global
 		{01DDFD6F-275D-46E7-B522-E0C965D1BF9C}.DebugAndPush|Any CPU.Build.0 = DebugAndPush|Any CPU
 		{01DDFD6F-275D-46E7-B522-E0C965D1BF9C}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{01DDFD6F-275D-46E7-B522-E0C965D1BF9C}.Release|Any CPU.Build.0 = Release|Any CPU
+		{7B2A5E3C-9F4D-4A1B-8C6E-1D3F5A7B9C0D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{7B2A5E3C-9F4D-4A1B-8C6E-1D3F5A7B9C0D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{7B2A5E3C-9F4D-4A1B-8C6E-1D3F5A7B9C0D}.DebugAndPush|Any CPU.ActiveCfg = Debug|Any CPU
+		{7B2A5E3C-9F4D-4A1B-8C6E-1D3F5A7B9C0D}.DebugAndPush|Any CPU.Build.0 = Debug|Any CPU
+		{7B2A5E3C-9F4D-4A1B-8C6E-1D3F5A7B9C0D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{7B2A5E3C-9F4D-4A1B-8C6E-1D3F5A7B9C0D}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
