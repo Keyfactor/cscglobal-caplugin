@@ -548,6 +548,91 @@ public class RequestManagerTests
     }
 
     // ---------------------------------------------------------------------
+    // Per-product-type domain scenarios (based on the underlying Sectigo Multi-Domain/UCC
+    // and Multi-Domain Wildcard products CSC resells - see sectigo.com/ssl-certificates-tls/
+    // multi-domain-san-ucc and sectigostore.com/ssl-types/multi-domain-wildcard). SANs on the
+    // Multiple Names products are not restricted to the CN's own base domain; unrelated domains,
+    // and wildcards for unrelated domains, are valid. Note the CN itself lives inside the CSR
+    // blob and isn't observable at this layer, so these only exercise SAN/EV/type routing.
+    // ---------------------------------------------------------------------
+
+    public static IEnumerable<object[]> ProductTypeDomainScenarios()
+    {
+        // productId, sanDomains, expectedCertificateType, expectSans, expectEv
+        yield return new object[] { "CSC TrustedSecure OV", Array.Empty<string>(), "0", false, false };
+        yield return new object[] { "CSC TrustedSecure OV Wildcard", Array.Empty<string>(), "1", false, false };
+        yield return new object[]
+        {
+            "CSC TrustedSecure OV, Multiple Names",
+            new[] { "www.example.com", "shop.example.net", "portal.othercompany.org" },
+            "2", true, false
+        };
+        yield return new object[] { "CSC TrustedSecure EV", Array.Empty<string>(), "3", false, true };
+        yield return new object[] { "CSC TrustedSecure DV", Array.Empty<string>(), "4", false, false };
+        yield return new object[] { "CSC TrustedSecure DV Wildcard", Array.Empty<string>(), "5", false, false };
+        yield return new object[]
+        {
+            "CSC TrustedSecure DV, Multiple Names",
+            new[] { "mail.example.com", "app.example.com", "www.unrelated-domain.io" },
+            "6", true, false
+        };
+        yield return new object[]
+        {
+            "CSC TrustedSecure EV, Multiple Names",
+            new[] { "www.example.com", "www.example-partner.com" },
+            "7", true, true
+        };
+        yield return new object[]
+        {
+            // Wildcard multi-name: additional wildcard SANs for entirely unrelated domains,
+            // per Sectigo's own "*.example1.com, *.example2.com, *.example3.com" example.
+            "CSC TrustedSecure OV Wildcard, Multiple Names",
+            new[] { "*.example2.com", "*.example3.com" },
+            "8", true, false
+        };
+        yield return new object[]
+        {
+            // Base domain + wildcard for the same domain as two separate SAN entries -
+            // Sectigo requires both explicitly since a wildcard SAN alone does not cover
+            // the bare base domain.
+            "CSC TrustedSecure DV Wildcard, Multiple Names",
+            new[] { "example.com", "*.example.com" },
+            "9", true, false
+        };
+    }
+
+    [Theory]
+    [MemberData(nameof(ProductTypeDomainScenarios))]
+    public void GetRegistrationRequest_ProductTypeDomainScenarios_BuildsExpectedRequest(
+        string productId, string[] sanDomains, string expectedCertificateType, bool expectSans, bool expectEv)
+    {
+        var sans = sanDomains.Length > 0
+            ? new Dictionary<string, string[]> { ["dnsname"] = sanDomains }
+            : new Dictionary<string, string[]>();
+        var productInfo = ProductInfo(productId, new Dictionary<string, string>
+        {
+            ["Domain Control Validation Method"] = "CNAME",
+            ["Organization Country"] = "US"
+        });
+
+        var request = Manager.GetRegistrationRequest(productInfo, SampleCsr, sans, new List<GetCustomField>());
+
+        Assert.Equal(expectedCertificateType, request.CertificateType);
+        Assert.Equal(expectEv, request.EvCertificateDetails != null);
+
+        if (!expectSans)
+        {
+            Assert.Null(request.SubjectAlternativeNames);
+            return;
+        }
+
+        Assert.NotNull(request.SubjectAlternativeNames);
+        Assert.Equal(sanDomains.Length, request.SubjectAlternativeNames.Count);
+        Assert.Equal(sanDomains, request.SubjectAlternativeNames.Select(s => s.DomainName));
+        Assert.All(request.SubjectAlternativeNames, s => Assert.NotNull(s.DomainControlValidation));
+    }
+
+    // ---------------------------------------------------------------------
     // GetNotifications
     // ---------------------------------------------------------------------
 
