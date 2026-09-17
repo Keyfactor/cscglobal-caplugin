@@ -140,6 +140,44 @@ public class RequestManagerTests
         Assert.Equal(2, result.EnrollmentContext.Count);
     }
 
+    [Fact]
+    public void GetEnrollmentResult_CnameMultiSanSharingBaseDomain_SingleDcvDetailCoversAllNames()
+    {
+        // Real CSC Global behavior: a wildcard CN plus two SAN entries all under the same
+        // registrable base domain ("boingy.com") only produces one dcvDetails entry for that
+        // base domain - CSC does not return one entry per requested SAN name.
+        var response = new RegistrationResponse
+        {
+            Result = new Result
+            {
+                CommonName = "*.boingy.com",
+                Status = new Status { Uuid = "b7094337-3fbb-4a3d-9a5c-3c2ea3394e92" },
+                DcvDetails = new List<DcvDetail>
+                {
+                    new DcvDetail
+                    {
+                        DomainName = "boingy.com",
+                        ActionNeeded = "Y",
+                        Email = null,
+                        CName = new CName
+                        {
+                            Name = "_489058F15A9A86BCDE6FAE1835C64424.boingy.com.",
+                            Value = "87754be597cffd626f3fd036ba2d21c0.1f782fab3e3a78e17fb68b2efcf391f6.0189912763034de0b9bc.sectigo.com."
+                        }
+                    }
+                }
+            }
+        };
+
+        var result = Manager.GetEnrollmentResult(response);
+
+        Assert.NotNull(result.EnrollmentContext);
+        Assert.Single(result.EnrollmentContext);
+        Assert.Equal(
+            "87754be597cffd626f3fd036ba2d21c0.1f782fab3e3a78e17fb68b2efcf391f6.0189912763034de0b9bc.sectigo.com.",
+            result.EnrollmentContext["_489058F15A9A86BCDE6FAE1835C64424.boingy.com."]);
+    }
+
     // ---------------------------------------------------------------------
     // GetRevokeResult
     // ---------------------------------------------------------------------
