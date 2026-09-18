@@ -610,8 +610,8 @@ public class CSCGlobalCAPluginTests
 
         Assert.Equal((int)EndEntityStatus.EXTERNALVALIDATION, result!.Status);
         Assert.NotNull(result.EnrollmentContext);
-        Assert.Contains("Flow: Enroll", result.EnrollmentContext["Flow Summary"]);
-        Assert.Contains("SubmitReissue", result.EnrollmentContext["Flow Summary"]);
+        Assert.Contains(result.EnrollmentContext.Keys, k => k.StartsWith("Flow: Enroll"));
+        Assert.Contains(result.EnrollmentContext.Keys, k => k.Contains("SubmitReissue"));
     }
 
     [Fact]
@@ -639,7 +639,8 @@ public class CSCGlobalCAPluginTests
         Assert.Equal((int)EndEntityStatus.EXTERNALVALIDATION, result!.Status);
         Assert.NotNull(result.EnrollmentContext);
         Assert.Equal("admin@example.com", result.EnrollmentContext["admin@example.com"]);
-        Assert.Contains("Flow: Enroll", result.EnrollmentContext["Flow Summary"]);
+        Assert.Contains(result.EnrollmentContext.Keys, k => k.StartsWith("Flow: Enroll"));
+        Assert.Contains(result.EnrollmentContext.Keys, k => k.Contains("SubmitRegistration"));
     }
 
     [Fact]

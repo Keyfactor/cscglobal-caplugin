@@ -230,6 +230,45 @@ public class FlowLogger : IDisposable
         return sb.ToString();
     }
 
+    /// <summary>
+    ///     Same information as <see cref="GetSummary" />, but as one entry per step instead of a
+    ///     single multi-line block. Intended for callers (e.g. EnrollmentResult.EnrollmentContext)
+    ///     whose rendering surface displays a dictionary as a bulleted list and doesn't respect
+    ///     embedded newlines - each step becomes its own bullet instead of one run-on line.
+    /// </summary>
+    public Dictionary<string, string> GetSummaryEntries()
+    {
+        var overallStatus = HasFailures ? "FAILED" : "OK";
+        var succeeded = _steps.Count(s => s.Status == StepStatus.Success);
+        var failed = _steps.Count(s => s.Status == StepStatus.Failed);
+        var skipped = _steps.Count(s => s.Status == StepStatus.Skipped);
+
+        var entries = new Dictionary<string, string>
+        {
+            [$"Flow: {_flowName}"] =
+                $"[{overallStatus}] {_overallStopwatch.ElapsedMilliseconds}ms total - " +
+                $"{_steps.Count} steps ({succeeded} ok, {failed} failed, {skipped} skipped)"
+        };
+
+        for (var i = 0; i < _steps.Count; i++)
+        {
+            var step = _steps[i];
+            var icon = step.Status == StepStatus.Success ? "OK"
+                : step.Status == StepStatus.Failed ? "FAIL"
+                : step.Status == StepStatus.Skipped ? "SKIP"
+                : "...";
+            var time = step.ElapsedMs.HasValue ? $" ({step.ElapsedMs}ms)" : "";
+            var detail = !string.IsNullOrEmpty(step.ErrorMessage) ? step.ErrorMessage
+                : !string.IsNullOrEmpty(step.Detail) ? step.Detail
+                : null;
+
+            entries[$"Flow Step {i + 1:00}: {step.Name}"] =
+                detail == null ? $"[{icon}]{time}" : $"[{icon}]{time} - {detail}";
+        }
+
+        return entries;
+    }
+
     public void Dispose()
     {
         _overallStopwatch.Stop();

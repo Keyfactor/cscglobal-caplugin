@@ -185,6 +185,33 @@ public class FlowLoggerTests
     }
 
     [Fact]
+    public void GetSummaryEntries_OneEntryPerStepPlusOverview()
+    {
+        using var flow = new FlowLogger(NewLoggerMock().Object, "Flow");
+        flow.Step("Ok");
+        flow.Skip("Skipped", "n/a");
+        flow.Fail("Failed", "bad");
+
+        var entries = flow.GetSummaryEntries();
+
+        // 1 overview entry + 3 step entries.
+        Assert.Equal(4, entries.Count);
+        Assert.Contains(entries.Keys, k => k.StartsWith("Flow: Flow"));
+        Assert.Contains("FAILED", entries.Single(e => e.Key.StartsWith("Flow: Flow")).Value);
+        Assert.Contains(entries, e => e.Key.EndsWith(": Ok") && e.Value.StartsWith("[OK]"));
+        Assert.Contains(entries, e => e.Key.EndsWith(": Skipped") && e.Value.Contains("n/a"));
+        Assert.Contains(entries, e => e.Key.EndsWith(": Failed") && e.Value.Contains("bad"));
+    }
+
+    [Fact]
+    public void GetSummaryEntries_NoSteps_ReturnsOnlyOverview()
+    {
+        using var flow = new FlowLogger(NewLoggerMock().Object, "Flow");
+        var entries = flow.GetSummaryEntries();
+        Assert.Single(entries);
+    }
+
+    [Fact]
     public void Dispose_DoesNotThrow()
     {
         var flow = new FlowLogger(NewLoggerMock().Object, "Flow");

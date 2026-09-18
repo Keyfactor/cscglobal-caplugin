@@ -488,8 +488,9 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
     // before hitting that error. Prepend the flow's step-by-step summary so the message shown
     // to the requester in Command explains what ran, not just how it ended. On success, the
     // requester-facing StatusMessage isn't surfaced by Command's enrollment UI at all - only
-    // EnrollmentContext is - so attach the summary there instead, as its own entry alongside
-    // whatever DCV instructions came back.
+    // EnrollmentContext is, rendered as a bulleted list - so attach one bullet per flow step
+    // there instead (rather than one embedded-newline blob, which the list doesn't render as
+    // separate lines), alongside whatever DCV instructions came back.
     private static void AttachFlowSummary(EnrollmentResult result, FlowLogger flow)
     {
         if (result == null) return;
@@ -501,7 +502,8 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
         }
 
         result.EnrollmentContext ??= new Dictionary<string, string>();
-        result.EnrollmentContext["Flow Summary"] = flow.GetSummary();
+        foreach (var entry in flow.GetSummaryEntries())
+            result.EnrollmentContext[entry.Key] = entry.Value;
     }
 
     //done
