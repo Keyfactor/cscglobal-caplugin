@@ -469,7 +469,7 @@ public class RequestManagerTests
         var productInfo = ProductInfo("CSC TrustedSecure OV, Multiple Names", new Dictionary<string, string>
         {
             ["Domain Control Validation Method"] = "EMAIL",
-            ["Addtl Sans Comma Separated DVC Emails"] = "admin@example.com,admin@other.com"
+            [EnrollmentConfigConstants.AdditionalSansCommaSeparatedDcvEmails] = "admin@example.com,admin@other.com"
         });
 
         var request = Manager.GetRegistrationRequest(productInfo, SampleCsr, sans, new List<GetCustomField>());

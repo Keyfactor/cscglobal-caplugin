@@ -424,7 +424,7 @@ public class RequestManager
             san.DomainName = domainName;
             if (methodType.ToUpper() == "EMAIL")
             {
-                productInfo.ProductParameters.TryGetValue("Addtl Sans Comma Separated DVC Emails", out var addtlSansEmails);
+                productInfo.ProductParameters.TryGetValue(EnrollmentConfigConstants.AdditionalSansCommaSeparatedDcvEmails, out var addtlSansEmails);
                 var emailAddresses = string.IsNullOrWhiteSpace(addtlSansEmails)
                     ? Array.Empty<string>()
                     : addtlSansEmails.Split(',');

@@ -6,6 +6,7 @@ v1.2.0
 - Enrollment/renewal/reissue failures now include the FlowLogger step-by-step summary ahead of the underlying error message in StatusMessage, instead of just a terse error. Also fixed enrollment failures reporting Status 30 (INPROCESS) instead of the correct FAILED status, and an exception thrown mid-enrollment no longer bubbles up as an unhandled error - it's now returned as a proper failed EnrollmentResult with full flow context.
 - Fixed a crash when CSC Global returns a null "price.total" (e.g. reissuing a certificate that is not in an active status) - Price.Total is now nullable instead of causing a JSON deserialization exception.
 - Fixed successful Renew and Reissue requests incorrectly reporting Status GENERATED (certificate issued) when CSC Global has only submitted the request and is still waiting on domain control validation. This caused the AnyGateway REST host to crash trying to parse a certificate that doesn't exist yet. Renew/Reissue now report EXTERNALVALIDATION, matching new enrollment, and surface the pending CNAME/email DCV instructions the same way.
+- Fixed the "Addtl Sans Comma Separated DCV Emails" enrollment field never actually being read during enrollment, due to a typo in the code looking up "DVC" instead of "DCV". Per-domain DCV emails for additional SANs on unrelated domains were silently ignored, falling back to the primary CN's DCV email - which does not have authority to validate a different domain.
 
 v.1.1.1
 - Added Incremental Sync that goes back X Number of days
