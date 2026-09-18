@@ -333,7 +333,7 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
 
                     flow.EndBranch();
                     var newResult = _requestManager.GetEnrollmentResult(enrollmentResponse);
-                    EnrichFailureWithFlowSummary(newResult, flow);
+                    AttachFlowSummary(newResult, flow);
                     LogEnrollmentOutcome(newResult, "New Enrollment");
                     Logger.MethodExit(LogLevel.Debug);
                     return newResult;
@@ -393,7 +393,7 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
                             Logger.LogTrace($"Renewal Response JSON: {JsonConvert.SerializeObject(renewResponse)}");
                             flow.EndBranch();
                             var renewResult = _requestManager.GetRenewResponse(renewResponse);
-                            EnrichFailureWithFlowSummary(renewResult, flow);
+                            AttachFlowSummary(renewResult, flow);
                             LogEnrollmentOutcome(renewResult, "Renewal");
                             Logger.MethodExit(LogLevel.Debug);
                             return renewResult;
@@ -437,7 +437,7 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
                         Logger.LogTrace($"Reissue Response JSON: {JsonConvert.SerializeObject(reissueResponse)}");
                         flow.EndBranch();
                         var reissueResult = _requestManager.GetReIssueResult(reissueResponse);
-                        EnrichFailureWithFlowSummary(reissueResult, flow);
+                        AttachFlowSummary(reissueResult, flow);
                         LogEnrollmentOutcome(reissueResult, "Reissue");
                         Logger.MethodExit(LogLevel.Debug);
                         return reissueResult;
@@ -486,11 +486,22 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
     // CSC Global business-level failures (e.g. "Open order in progress") come back from
     // RequestManager as a terse StatusMessage with no context on what the plugin actually did
     // before hitting that error. Prepend the flow's step-by-step summary so the message shown
-    // to the requester in Command explains what ran, not just how it ended.
-    private static void EnrichFailureWithFlowSummary(EnrollmentResult result, FlowLogger flow)
+    // to the requester in Command explains what ran, not just how it ended. On success, the
+    // requester-facing StatusMessage isn't surfaced by Command's enrollment UI at all - only
+    // EnrollmentContext is - so attach the summary there instead, as its own entry alongside
+    // whatever DCV instructions came back.
+    private static void AttachFlowSummary(EnrollmentResult result, FlowLogger flow)
     {
-        if (result?.Status == (int)EndEntityStatus.FAILED)
+        if (result == null) return;
+
+        if (result.Status == (int)EndEntityStatus.FAILED)
+        {
             result.StatusMessage = $"{flow.GetSummary()}\n\n{result.StatusMessage}";
+            return;
+        }
+
+        result.EnrollmentContext ??= new Dictionary<string, string>();
+        result.EnrollmentContext["Flow Summary"] = flow.GetSummary();
     }
 
     //done

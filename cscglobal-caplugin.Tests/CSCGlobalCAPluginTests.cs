@@ -609,6 +609,37 @@ public class CSCGlobalCAPluginTests
             RequestFormat.PKCS10, EnrollmentType.RenewOrReissue);
 
         Assert.Equal((int)EndEntityStatus.EXTERNALVALIDATION, result!.Status);
+        Assert.NotNull(result.EnrollmentContext);
+        Assert.Contains("Flow: Enroll", result.EnrollmentContext["Flow Summary"]);
+        Assert.Contains("SubmitReissue", result.EnrollmentContext["Flow Summary"]);
+    }
+
+    [Fact]
+    public async Task Enroll_New_Success_AttachesFlowSummaryAlongsideDcvContext()
+    {
+        // On success, StatusMessage isn't surfaced by Command's enrollment UI - only
+        // EnrollmentContext is - so the flow summary must ride alongside whatever DCV
+        // instructions came back, not replace them.
+        var mockClient = new Mock<ICscGlobalClient>();
+        mockClient.Setup(c => c.SubmitGetCustomFields()).ReturnsAsync(new List<GetCustomField>());
+        mockClient.Setup(c => c.SubmitRegistrationAsync(It.IsAny<RegistrationRequest>())).ReturnsAsync(new RegistrationResponse
+        {
+            Result = new Result
+            {
+                CommonName = "new.example.com",
+                Status = new Status { Uuid = "uuid-new" },
+                DcvDetails = new List<DcvDetail> { new DcvDetail { Email = "admin@example.com" } }
+            }
+        });
+
+        var plugin = MakePlugin(mockClient);
+        var result = await plugin.Enroll("csr", "CN=test", new Dictionary<string, string[]>(), ProductInfo(),
+            RequestFormat.PKCS10, EnrollmentType.New);
+
+        Assert.Equal((int)EndEntityStatus.EXTERNALVALIDATION, result!.Status);
+        Assert.NotNull(result.EnrollmentContext);
+        Assert.Equal("admin@example.com", result.EnrollmentContext["admin@example.com"]);
+        Assert.Contains("Flow: Enroll", result.EnrollmentContext["Flow Summary"]);
     }
 
     [Fact]
