@@ -23,13 +23,16 @@ public class ProductIDs
 {
     public static List<String> productIds = new List<string>()
     {
-        "CSC TrustedSecure Premium Certificate",
-        "CSC TrustedSecure EV Certificate",
-        "CSC TrustedSecure UC Certificate",
-        "CSC TrustedSecure Premium Wildcard Certificate",
-        "CSC TrustedSecure Domain Validated SSL",
-        "CSC Trusted Secure Domain Validated Wildcard SSL",
-        "CSC Trusted Secure Domain Validated UC Certificate"
+        "CSC TrustedSecure OV",
+        "CSC TrustedSecure OV Wildcard",
+        "CSC TrustedSecure OV, Multiple Names",
+        "CSC TrustedSecure EV",
+        "CSC TrustedSecure DV",
+        "CSC TrustedSecure DV Wildcard",
+        "CSC TrustedSecure DV, Multiple Names",
+        "CSC TrustedSecure EV, Multiple Names",
+        "CSC TrustedSecure OV Wildcard, Multiple Names",
+        "CSC TrustedSecure DV Wildcard, Multiple Names"
     };
 }
 
