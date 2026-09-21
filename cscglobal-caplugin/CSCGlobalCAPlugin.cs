@@ -63,7 +63,9 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
         _validatorFactory = validatorFactory;
     }
 
-    private ICscGlobalClient CscGlobalClient { get; set; }
+    // internal (not private) purely so the test project can inject a mock via
+    // InternalsVisibleTo, instead of hitting the real CSC Global API in unit tests.
+    internal ICscGlobalClient CscGlobalClient { get; set; }
 
     /// <summary>
     ///     Whether the CA is enabled. When false, the plugin returns early from Ping,
