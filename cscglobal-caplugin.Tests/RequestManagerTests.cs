@@ -546,6 +546,23 @@ public class RequestManagerTests
         Assert.Empty(request.CustomFields);
     }
 
+    [Fact]
+    public void GetRegistrationRequest_CustomFieldsWithNullEntryAndBlankLabel_SkipsBoth()
+    {
+        var productInfo = ProductInfo("CSC TrustedSecure DV", new Dictionary<string, string> { ["Custom Field"] = "value" });
+        var customFields = new List<GetCustomField>
+        {
+            null!,
+            new GetCustomField { Label = "", Mandatory = false },
+            new GetCustomField { Label = "Custom Field", Mandatory = false }
+        };
+
+        var request = Manager.GetRegistrationRequest(productInfo, SampleCsr, new Dictionary<string, string[]>(), customFields);
+
+        Assert.Single(request.CustomFields);
+        Assert.Equal("value", request.CustomFields[0].Value);
+    }
+
     // ---------------------------------------------------------------------
     // GetRenewalRequest / GetReissueRequest - parity with GetRegistrationRequest
     // ---------------------------------------------------------------------
@@ -581,11 +598,109 @@ public class RequestManagerTests
     }
 
     [Fact]
+    public void GetRegistrationRequest_AllOptionalParametersSupplied_MapsEachField()
+    {
+        var productInfo = ProductInfo("CSC TrustedSecure DV", new Dictionary<string, string>
+        {
+            ["Term"] = "12",
+            ["Applicant First Name"] = "Jane",
+            ["Applicant Last Name"] = "Doe",
+            ["Applicant Email Address"] = "jane.doe@example.com",
+            ["Applicant Phone"] = "555-1234",
+            ["Organization Contact"] = "contact-1",
+            ["Business Unit"] = "IT"
+        });
+
+        var request = Manager.GetRegistrationRequest(productInfo, SampleCsr, new Dictionary<string, string[]>(), new List<GetCustomField>());
+
+        Assert.Equal("12", request.Term);
+        Assert.Equal("Jane", request.ApplicantFirstName);
+        Assert.Equal("Doe", request.ApplicantLastName);
+        Assert.Equal("jane.doe@example.com", request.ApplicantEmailAddress);
+        Assert.Equal("555-1234", request.ApplicantPhoneNumber);
+        Assert.Equal("contact-1", request.OrganizationContact);
+        Assert.Equal("IT", request.BusinessUnit);
+    }
+
+    [Fact]
+    public void GetRenewalRequest_AllOptionalParametersSupplied_MapsEachField()
+    {
+        var productInfo = ProductInfo("CSC TrustedSecure DV", new Dictionary<string, string>
+        {
+            ["Term"] = "24",
+            ["Applicant First Name"] = "John",
+            ["Applicant Last Name"] = "Smith",
+            ["Applicant Email Address"] = "john.smith@example.com",
+            ["Applicant Phone"] = "555-5678",
+            ["Organization Contact"] = "contact-2",
+            ["Business Unit"] = "Legal"
+        });
+
+        var request = Manager.GetRenewalRequest(productInfo, "uuid-renewal", SampleCsr, new Dictionary<string, string[]>(), new List<GetCustomField>());
+
+        Assert.Equal("24", request.Term);
+        Assert.Equal("John", request.ApplicantFirstName);
+        Assert.Equal("Smith", request.ApplicantLastName);
+        Assert.Equal("john.smith@example.com", request.ApplicantEmailAddress);
+        Assert.Equal("555-5678", request.ApplicantPhoneNumber);
+        Assert.Equal("contact-2", request.OrganizationContact);
+        Assert.Equal("Legal", request.BusinessUnit);
+    }
+
+    [Fact]
+    public void GetReissueRequest_AllOptionalParametersSupplied_MapsEachField()
+    {
+        var productInfo = ProductInfo("CSC TrustedSecure DV", new Dictionary<string, string>
+        {
+            ["Term"] = "36",
+            ["Applicant First Name"] = "Alex",
+            ["Applicant Last Name"] = "Nguyen",
+            ["Applicant Email Address"] = "alex.nguyen@example.com",
+            ["Applicant Phone"] = "555-9012",
+            ["Organization Contact"] = "contact-3",
+            ["Business Unit"] = "Finance"
+        });
+
+        var request = Manager.GetReissueRequest(productInfo, "uuid-reissue", SampleCsr, new Dictionary<string, string[]>(), new List<GetCustomField>());
+
+        Assert.Equal("36", request.Term);
+        Assert.Equal("Alex", request.ApplicantFirstName);
+        Assert.Equal("Nguyen", request.ApplicantLastName);
+        Assert.Equal("alex.nguyen@example.com", request.ApplicantEmailAddress);
+        Assert.Equal("555-9012", request.ApplicantPhoneNumber);
+        Assert.Equal("contact-3", request.OrganizationContact);
+        Assert.Equal("Finance", request.BusinessUnit);
+    }
+
+    [Fact]
     public void GetRegistrationRequest_NullProductParameters_Throws()
     {
         var productInfo = new EnrollmentProductInfo { ProductID = "CSC TrustedSecure DV", ProductParameters = null! };
         Assert.Throws<ArgumentNullException>(() =>
             Manager.GetRegistrationRequest(productInfo, SampleCsr, new Dictionary<string, string[]>(), new List<GetCustomField>()));
+    }
+
+    [Fact]
+    public void GetRegistrationRequest_NullProductInfo_Throws()
+    {
+        Assert.Throws<ArgumentNullException>(() =>
+            Manager.GetRegistrationRequest(null!, SampleCsr, new Dictionary<string, string[]>(), new List<GetCustomField>()));
+    }
+
+    [Fact]
+    public void GetRegistrationRequest_NullCsr_Throws()
+    {
+        Assert.Throws<ArgumentNullException>(() =>
+            Manager.GetRegistrationRequest(ProductInfo("CSC TrustedSecure DV"), null!, new Dictionary<string, string[]>(), new List<GetCustomField>()));
+    }
+
+    [Fact]
+    public void GetRegistrationRequest_CsrLongerThan64Chars_WrapsWithPemify()
+    {
+        var longCsr = new string('X', 130);
+        var request = Manager.GetRegistrationRequest(ProductInfo("CSC TrustedSecure DV"), longCsr, new Dictionary<string, string[]>(), new List<GetCustomField>());
+        var decoded = System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(request.Csr));
+        Assert.Contains("\n", decoded);
     }
 
     [Fact]

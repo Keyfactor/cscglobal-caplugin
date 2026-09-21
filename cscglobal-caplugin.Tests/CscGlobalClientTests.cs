@@ -98,6 +98,33 @@ public class CscGlobalClientTests
     }
 
     [Fact]
+    public void Constructor_NullApiKeyValue_Throws()
+    {
+        // Key present but value is a null object (distinct from a missing key or an empty string -
+        // exercises the `?.ToString()` null-conditional rather than the ContainsKey check).
+        var mock = new Mock<IAnyCAPluginConfigProvider>();
+        mock.Setup(c => c.CAConnectionData).Returns(new Dictionary<string, object>
+        {
+            [Constants.CscGlobalApiKey] = null!,
+            [Constants.CscGlobalUrl] = "https://example.invalid/"
+        });
+        Assert.Throws<InvalidOperationException>(() => new CscGlobalClient(mock.Object));
+    }
+
+    [Fact]
+    public void Constructor_NullUrlValue_Throws()
+    {
+        // Url key present but value is a null object (distinct from a missing key).
+        var mock = new Mock<IAnyCAPluginConfigProvider>();
+        mock.Setup(c => c.CAConnectionData).Returns(new Dictionary<string, object>
+        {
+            [Constants.CscGlobalApiKey] = "api-key",
+            [Constants.CscGlobalUrl] = null!
+        });
+        Assert.Throws<InvalidOperationException>(() => new CscGlobalClient(mock.Object));
+    }
+
+    [Fact]
     public void Constructor_EmptyBearerTokenValue_Throws()
     {
         var mock = new Mock<IAnyCAPluginConfigProvider>();
@@ -106,6 +133,21 @@ public class CscGlobalClientTests
             [Constants.CscGlobalApiKey] = "api-key",
             [Constants.CscGlobalUrl] = "https://example.invalid/",
             [Constants.BearerToken] = ""
+        });
+        Assert.Throws<InvalidOperationException>(() => new CscGlobalClient(mock.Object));
+    }
+
+    [Fact]
+    public void Constructor_NullBearerTokenValue_Throws()
+    {
+        // BearerToken key present but value is a null object (distinct from a missing key or an
+        // empty string - exercises the `?.ToString()` null-conditional rather than ContainsKey).
+        var mock = new Mock<IAnyCAPluginConfigProvider>();
+        mock.Setup(c => c.CAConnectionData).Returns(new Dictionary<string, object>
+        {
+            [Constants.CscGlobalApiKey] = "api-key",
+            [Constants.CscGlobalUrl] = "https://example.invalid/",
+            [Constants.BearerToken] = null!
         });
         Assert.Throws<InvalidOperationException>(() => new CscGlobalClient(mock.Object));
     }

@@ -171,6 +171,42 @@ public class CSCGlobalCAPluginTests
     }
 
     [Fact]
+    public void Initialize_EnabledKeyPresentButNullValue_DefaultsToTrue()
+    {
+        var plugin = new CSCGlobalCAPlugin();
+        plugin.Initialize(ConfigProviderMock(new Dictionary<string, object> { [Constants.Enabled] = null! }).Object,
+            Mock.Of<ICertificateDataReader>());
+        Assert.True(plugin.Enabled);
+    }
+
+    [Fact]
+    public void Initialize_SyncFilterDaysKeyPresentButNullValue_DefaultsToZero()
+    {
+        var plugin = new CSCGlobalCAPlugin();
+        plugin.Initialize(ConfigProviderMock(new Dictionary<string, object> { [Constants.SyncFilterDays] = null! }).Object,
+            Mock.Of<ICertificateDataReader>());
+        Assert.Equal(0, plugin.SyncFilterDays);
+    }
+
+    [Fact]
+    public void Initialize_RenewalWindowDaysKeyPresentButNullValue_DefaultsTo30()
+    {
+        var plugin = new CSCGlobalCAPlugin();
+        plugin.Initialize(ConfigProviderMock(new Dictionary<string, object> { [Constants.RenewalWindowDays] = null! }).Object,
+            Mock.Of<ICertificateDataReader>());
+        Assert.Equal(30, plugin.RenewalWindowDays);
+    }
+
+    [Fact]
+    public void Initialize_DcvPollTimeoutSecondsKeyPresentButNullValue_DefaultsToZero()
+    {
+        var plugin = new CSCGlobalCAPlugin();
+        plugin.Initialize(ConfigProviderMock(new Dictionary<string, object> { [Constants.DcvPollTimeoutSeconds] = null! }).Object,
+            Mock.Of<ICertificateDataReader>());
+        Assert.Equal(0, plugin.DcvPollTimeoutSeconds);
+    }
+
+    [Fact]
     public void Initialize_WithValidatorFactory_DoesNotThrow()
     {
         var plugin = new CSCGlobalCAPlugin(Mock.Of<IDomainValidatorFactory>());
@@ -323,6 +359,24 @@ public class CSCGlobalCAPluginTests
 
         Assert.NotNull(capturedFilter);
         Assert.NotEqual("not-called", capturedFilter);
+    }
+
+    [Fact]
+    public async Task Synchronize_IncrementalSync_SyncFilterDaysNotConfigured_DefaultsToFiveDays()
+    {
+        var mockClient = new Mock<ICscGlobalClient>();
+        string? capturedFilter = "not-called";
+        mockClient.Setup(c => c.SubmitCertificateListRequestAsync(It.IsAny<string>()))
+            .Callback<string>(f => capturedFilter = f)
+            .ReturnsAsync(new CertificateListResponse { Results = new List<CertificateResponse>() });
+
+        var plugin = MakePlugin(mockClient);
+        var buffer = new System.Collections.Concurrent.BlockingCollection<AnyCAPluginCertificate>();
+
+        await plugin.Synchronize(buffer, null, false, CancellationToken.None);
+
+        var expected = DateTime.Today.Subtract(TimeSpan.FromDays(5)).ToString("yyyy/MM/dd");
+        Assert.Equal(expected, capturedFilter);
     }
 
     [Fact]
@@ -495,6 +549,13 @@ public class CSCGlobalCAPluginTests
     }
 
     [Fact]
+    public async Task Revoke_NullId_Throws()
+    {
+        var plugin = MakePlugin();
+        await Assert.ThrowsAsync<ArgumentNullException>(() => plugin.Revoke(null!, "serial", 0));
+    }
+
+    [Fact]
     public async Task Revoke_NullResponse_Throws()
     {
         var uuid = Guid.NewGuid().ToString();
@@ -586,6 +647,13 @@ public class CSCGlobalCAPluginTests
     {
         var plugin = MakePlugin();
         await plugin.ValidateCAConnectionInfo(new Dictionary<string, object> { [Constants.Enabled] = "false" });
+    }
+
+    [Fact]
+    public async Task ValidateCAConnectionInfo_UnparsableEnabledValue_TreatsAsEnabled()
+    {
+        var plugin = MakePlugin();
+        await plugin.ValidateCAConnectionInfo(new Dictionary<string, object> { [Constants.Enabled] = "not-a-bool" });
     }
 
     // ---------------------------------------------------------------------
@@ -716,6 +784,15 @@ public class CSCGlobalCAPluginTests
         var plugin = MakePlugin();
         await Assert.ThrowsAsync<ArgumentNullException>(() =>
             plugin.Enroll("csr", "CN=test", new Dictionary<string, string[]>(), null!, RequestFormat.PKCS10, EnrollmentType.New));
+    }
+
+    [Fact]
+    public async Task Enroll_NullProductParameters_Throws()
+    {
+        var plugin = MakePlugin();
+        var productInfo = new EnrollmentProductInfo { ProductID = "CSC TrustedSecure DV", ProductParameters = null! };
+        await Assert.ThrowsAsync<ArgumentNullException>(() =>
+            plugin.Enroll("csr", "CN=test", new Dictionary<string, string[]>(), productInfo, RequestFormat.PKCS10, EnrollmentType.New));
     }
 
     [Fact]
@@ -1015,6 +1092,44 @@ public class CSCGlobalCAPluginTests
         mockValidator.Setup(v => v.GetValidationType()).Returns("cname");
         mockValidator.Setup(v => v.StageValidation(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new DomainValidationResult { Success = false, Status = "error", ErrorMessage = "nope" });
+
+        var mockFactory = new Mock<IDomainValidatorFactory>();
+        mockFactory.Setup(f => f.ResolveDomainValidator(It.IsAny<string>(), "cname")).Returns(mockValidator.Object);
+
+        var plugin = MakePlugin(mockClient, validatorFactory: mockFactory.Object);
+        var productInfo = ProductInfo(parameters: new Dictionary<string, string>
+        {
+            [EnrollmentConfigConstants.DomainControlValidationMethod] = "CNAME"
+        });
+
+        var result = await plugin.Enroll("csr", "CN=test", new Dictionary<string, string[]>(), productInfo,
+            RequestFormat.PKCS10, EnrollmentType.New);
+
+        Assert.Equal((int)EndEntityStatus.EXTERNALVALIDATION, result.Status);
+    }
+
+    [Fact]
+    public async Task Enroll_New_DnsValidatorReturnsNullResult_DoesNotThrow()
+    {
+        var mockClient = new Mock<ICscGlobalClient>();
+        mockClient.Setup(c => c.SubmitGetCustomFields()).ReturnsAsync(new List<GetCustomField>());
+        mockClient.Setup(c => c.SubmitRegistrationAsync(It.IsAny<RegistrationRequest>())).ReturnsAsync(new RegistrationResponse
+        {
+            Result = new Result
+            {
+                CommonName = "fail-null.example.com",
+                Status = new Status { Uuid = "uuid-fail-null" },
+                DcvDetails = new List<DcvDetail>
+                {
+                    new DcvDetail { CName = new CName { Name = "_dnsauth.example.com", Value = "target.sectigo.com" } }
+                }
+            }
+        });
+
+        var mockValidator = new Mock<IDomainValidator>();
+        mockValidator.Setup(v => v.GetValidationType()).Returns("cname");
+        mockValidator.Setup(v => v.StageValidation(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((DomainValidationResult)null!);
 
         var mockFactory = new Mock<IDomainValidatorFactory>();
         mockFactory.Setup(f => f.ResolveDomainValidator(It.IsAny<string>(), "cname")).Returns(mockValidator.Object);
@@ -1685,5 +1800,43 @@ public class CSCGlobalCAPluginTests
             RequestFormat.PKCS10, EnrollmentType.RenewOrReissue);
 
         Assert.Equal((int)EndEntityStatus.EXTERNALVALIDATION, result.Status);
+    }
+
+    [Fact]
+    public async Task Enroll_RenewOrReissue_NoOrderDateAndNoExpirationDateOnReader_FallsThroughToSingleRecordLookup()
+    {
+        var orderUuid = Guid.NewGuid().ToString();
+        var mockClient = new Mock<ICscGlobalClient>();
+        mockClient.Setup(c => c.SubmitGetCustomFields()).ReturnsAsync(new List<GetCustomField>());
+        // No OrderDate -> falls back to expiry check. GetExpirationDateByRequestId (below) returns
+        // null, so the fallback's "??" actually has to call GetSingleRecord for a second time to
+        // get a RevocationDate - which is never set by GetSingleRecord, so it stays null and the
+        // nullable "<" comparison evaluates to false (not a renewal).
+        mockClient.Setup(c => c.SubmitGetCertificateAsync(orderUuid)).ReturnsAsync(new CertificateResponse
+        {
+            OrderDate = null,
+            Status = "ACTIVE"
+        });
+        mockClient.Setup(c => c.SubmitReissueAsync(It.IsAny<ReissueRequest>())).ReturnsAsync(new ReissueResponse
+        {
+            Result = new Result { CommonName = "reissue.example.com", Status = new Status { Uuid = orderUuid } }
+        });
+
+        var certDataReader = new Mock<ICertificateDataReader>();
+        certDataReader.Setup(r => r.GetRequestIDBySerialNumber("ABC123")).ReturnsAsync(orderUuid);
+        certDataReader.Setup(r => r.GetExpirationDateByRequestId(orderUuid)).Returns((DateTime?)null);
+
+        var plugin = MakePlugin(mockClient, certDataReader);
+        var productInfo = ProductInfo(parameters: new Dictionary<string, string>
+        {
+            ["PriorCertSN"] = "ABC123",
+            ["Applicant Last Name"] = "Doe"
+        });
+
+        var result = await plugin.Enroll("csr", "CN=test", new Dictionary<string, string[]>(), productInfo,
+            RequestFormat.PKCS10, EnrollmentType.RenewOrReissue);
+
+        Assert.Equal((int)EndEntityStatus.EXTERNALVALIDATION, result.Status);
+        mockClient.Verify(c => c.SubmitReissueAsync(It.IsAny<ReissueRequest>()), Times.Once);
     }
 }
