@@ -21,7 +21,13 @@ public sealed class CscGlobalClient : ICscGlobalClient
 {
     private readonly ILogger Logger;
 
-    public CscGlobalClient(IAnyCAPluginConfigProvider config)
+    public CscGlobalClient(IAnyCAPluginConfigProvider config) : this(config, null)
+    {
+    }
+
+    // internal so the test project can supply a fake HttpMessageHandler via
+    // InternalsVisibleTo, instead of the client making real HTTP calls in unit tests.
+    internal CscGlobalClient(IAnyCAPluginConfigProvider config, HttpMessageHandler? handler)
     {
         Logger = LogHandler.GetClassLogger<CscGlobalClient>();
 
@@ -68,7 +74,7 @@ public sealed class CscGlobalClient : ICscGlobalClient
             }
             Logger.LogTrace("CscGlobalClient: BearerToken is present (length={Length}).", Authorization.Length);
 
-            RestClient = ConfigureRestClient();
+            RestClient = ConfigureRestClient(handler);
             Logger.LogTrace("CscGlobalClient: RestClient configured successfully.");
         }
         else
@@ -352,10 +358,9 @@ public sealed class CscGlobalClient : ICscGlobalClient
         return certificateListResponse;
     }
 
-    private HttpClient ConfigureRestClient()
+    private HttpClient ConfigureRestClient(HttpMessageHandler? handler = null)
     {
-        var clientHandler = new HttpClientHandler();
-        var returnClient = new HttpClient(clientHandler, true)
+        var returnClient = new HttpClient(handler ?? new HttpClientHandler(), true)
         {
             BaseAddress = BaseUrl
         };
