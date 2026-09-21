@@ -1,9 +1,10 @@
-v1.1.3
-- Fixed KeyNotFoundException during enrollment when the optional "Addtl Sans Comma Separated DVC Emails" field was not set
-- Fixed KeyNotFoundException during enrollment when no SANs were supplied for a UC certificate
-
-v1.1.2
-- Fixed NullReferenceException in GetEnrollmentResult when CSC returned a DCV email of null (typical for EMAIL DCV orders with actionNeeded=N, and for CNAME-only DCV)
+v1.2.0
+- Added support for CSC TrustedSecure EV, Multiple Names; CSC TrustedSecure OV Wildcard, Multiple Names; and CSC TrustedSecure DV Wildcard, Multiple Names certificate products
+- Renamed all certificate template product IDs to match CSC's current certificate type names (e.g. "CSC TrustedSecure Premium Certificate" is now "CSC TrustedSecure OV", "CSC TrustedSecure Domain Validated SSL" is now "CSC TrustedSecure DV"). Existing Certificate Templates in Command using the old names continue to work; new Templates should use the new names.
+- Fixed the "Addtl Sans Comma Separated DCV Emails" enrollment field never actually being read during enrollment, due to a typo in the code looking up "DVC" instead of "DCV". Per-domain DCV emails for additional SANs on unrelated domains were silently ignored, falling back to the primary CN's DCV email - which does not have authority to validate a different domain.
+- Fixed a case-sensitivity bug ("priorcertsn" vs "PriorCertSN") that prevented PriorCertSN from ever being read during Renew/Reissue enrollment.
+- Fixed a crash when CSC Global returns a null "price.total" (e.g. reissuing a certificate that is not in an active status) - Price.Total is now nullable instead of causing a JSON deserialization exception.
+- Added an xUnit test suite covering certificate type/SAN/EV routing, legacy product name backward compatibility, and the fixes above.
 
 v.1.1.1
 - Added Incremental Sync that goes back X Number of days
