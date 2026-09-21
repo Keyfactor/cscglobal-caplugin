@@ -422,59 +422,6 @@ public class RequestManager
     public bool IsKnownProductId(string productId) =>
         !string.IsNullOrEmpty(productId) && ProductIdToCodeMap.ContainsKey(productId);
 
-    // Reverse map: CSC API certificateType string -> Keyfactor product ID (used during sync)
-    // Note: CSC naming is inconsistent — first 4 types use "TrustedSecure" (no space),
-    //       DV Wildcard and DV UC use "Trusted Secure" (with space),
-    //       but CSC API returns DV SSL as "CSC Trusted Secure Domain Validated SSL" (with space)
-    //       while the product ID is "CSC TrustedSecure Domain Validated SSL" (no space).
-    private static readonly Dictionary<string, string> CodeToProductIdMap = new(StringComparer.OrdinalIgnoreCase)
-    {
-        // Premium
-        ["0"] = "CSC TrustedSecure Premium Certificate",
-        ["CSC TrustedSecure Premium Certificate"] = "CSC TrustedSecure Premium Certificate",
-        ["CSC Trusted Secure Premium Certificate"] = "CSC TrustedSecure Premium Certificate",
-        ["CSC TrustedSecure OV"] = "CSC TrustedSecure Premium Certificate",
-        // Premium Wildcard
-        ["1"] = "CSC TrustedSecure Premium Wildcard Certificate",
-        ["CSC TrustedSecure Premium Wildcard Certificate"] = "CSC TrustedSecure Premium Wildcard Certificate",
-        ["CSC Trusted Secure Premium Wildcard Certificate"] = "CSC TrustedSecure Premium Wildcard Certificate",
-        ["CSC TrustedSecure OV Wildcard"] = "CSC TrustedSecure Premium Wildcard Certificate",
-        // UC
-        ["2"] = "CSC TrustedSecure UC Certificate",
-        ["CSC TrustedSecure UC Certificate"] = "CSC TrustedSecure UC Certificate",
-        ["CSC Trusted Secure UC Certificate"] = "CSC TrustedSecure UC Certificate",
-        ["CSC TrustedSecure OV, Multiple Names"] = "CSC TrustedSecure UC Certificate",
-        // EV
-        ["3"] = "CSC TrustedSecure EV Certificate",
-        ["CSC TrustedSecure EV Certificate"] = "CSC TrustedSecure EV Certificate",
-        ["CSC Trusted Secure EV Certificate"] = "CSC TrustedSecure EV Certificate",
-        ["CSC TrustedSecure EV"] = "CSC TrustedSecure EV Certificate",
-        // DV SSL — product ID has no space, but CSC API returns with space
-        ["4"] = "CSC TrustedSecure Domain Validated SSL",
-        ["CSC TrustedSecure Domain Validated SSL"] = "CSC TrustedSecure Domain Validated SSL",
-        ["CSC Trusted Secure Domain Validated SSL"] = "CSC TrustedSecure Domain Validated SSL",
-        ["CSC TrustedSecure DV"] = "CSC TrustedSecure Domain Validated SSL",
-        // DV Wildcard — product ID has space (matches CSC API)
-        ["5"] = "CSC Trusted Secure Domain Validated Wildcard SSL",
-        ["CSC Trusted Secure Domain Validated Wildcard SSL"] = "CSC Trusted Secure Domain Validated Wildcard SSL",
-        ["CSC TrustedSecure Domain Validated Wildcard SSL"] = "CSC Trusted Secure Domain Validated Wildcard SSL",
-        ["CSC TrustedSecure DV Wildcard"] = "CSC Trusted Secure Domain Validated Wildcard SSL",
-        // DV UC — product ID has space (matches CSC API)
-        ["6"] = "CSC Trusted Secure Domain Validated UC Certificate",
-        ["CSC Trusted Secure Domain Validated UC Certificate"] = "CSC Trusted Secure Domain Validated UC Certificate",
-        ["CSC TrustedSecure Domain Validated UC Certificate"] = "CSC Trusted Secure Domain Validated UC Certificate",
-        ["CSC TrustedSecure DV, Multiple Names"] = "CSC Trusted Secure Domain Validated UC Certificate",
-        // EV, Multiple Names — new in 1.2.0, no legacy name
-        ["7"] = "CSC TrustedSecure EV, Multiple Names",
-        ["CSC TrustedSecure EV, Multiple Names"] = "CSC TrustedSecure EV, Multiple Names",
-        // OV Wildcard, Multiple Names — new in 1.2.0, no legacy name
-        ["8"] = "CSC TrustedSecure OV Wildcard, Multiple Names",
-        ["CSC TrustedSecure OV Wildcard, Multiple Names"] = "CSC TrustedSecure OV Wildcard, Multiple Names",
-        // DV Wildcard, Multiple Names — new in 1.2.0, no legacy name
-        ["9"] = "CSC TrustedSecure DV Wildcard, Multiple Names",
-        ["CSC TrustedSecure DV Wildcard, Multiple Names"] = "CSC TrustedSecure DV Wildcard, Multiple Names",
-    };
-
     private string GetCertificateType(string productId)
     {
         Logger.LogTrace("GetCertificateType: productId='{ProductId}'", productId ?? "(null)");
@@ -485,22 +432,6 @@ public class RequestManager
         }
         Logger.LogWarning("GetCertificateType: no mapping found for '{ProductId}', returning -1.", productId);
         return "-1";
-    }
-
-    /// <summary>
-    ///     Maps a CSC API certificateType value back to a Keyfactor product ID.
-    ///     Handles numeric codes, descriptive strings, and passthrough of already-correct values.
-    /// </summary>
-    public string MapCertificateTypeToProductId(string cscCertificateType)
-    {
-        Logger.LogTrace("MapCertificateTypeToProductId: input='{CscCertType}'", cscCertificateType ?? "(null)");
-        if (!string.IsNullOrEmpty(cscCertificateType) && CodeToProductIdMap.TryGetValue(cscCertificateType, out var productId))
-        {
-            Logger.LogTrace("MapCertificateTypeToProductId: mapped '{CscCertType}' -> '{ProductId}'", cscCertificateType, productId);
-            return productId;
-        }
-        Logger.LogWarning("MapCertificateTypeToProductId: no mapping for '{CscCertType}', passing through as-is.", cscCertificateType);
-        return cscCertificateType ?? "CscGlobal";
     }
 
     public Notifications GetNotifications(EnrollmentProductInfo productInfo)
