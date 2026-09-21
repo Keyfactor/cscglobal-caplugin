@@ -2,8 +2,8 @@
     "$schema": "https://keyfactor.github.io/integration-manifest-schema.json",
     "integration_type": "anyca-plugin",
     "name": "CSCGlobal CAPlugin REST Gateway Plugin",
-    "support_level": "kf-supported",
     "status": "production",
+    "support_level": "kf-supported",
     "link_github": true,
     "update_catalog": true,
     "description": "CSCGlobal CAPlugin for the AnyCA REST Gateway framework",
@@ -93,13 +93,16 @@
                 }
             ],
             "product_ids": [
-                "CSC TrustedSecure Premium Certificate",
-                "CSC TrustedSecure EV Certificate",
-                "CSC TrustedSecure UC Certificate",
-                "CSC TrustedSecure Premium Wildcard Certificate",
-                "CSC TrustedSecure Domain Validated SSL",
-                "CSC Trusted Secure Domain Validated Wildcard SSL",
-                "CSC Trusted Secure Domain Validated UC Certificate"
+                "CSC TrustedSecure OV",
+                "CSC TrustedSecure OV Wildcard",
+                "CSC TrustedSecure OV, Multiple Names",
+                "CSC TrustedSecure EV",
+                "CSC TrustedSecure DV",
+                "CSC TrustedSecure DV Wildcard",
+                "CSC TrustedSecure DV, Multiple Names",
+                "CSC TrustedSecure EV, Multiple Names",
+                "CSC TrustedSecure OV Wildcard, Multiple Names",
+                "CSC TrustedSecure DV Wildcard, Multiple Names"
             ]
         }
     }
