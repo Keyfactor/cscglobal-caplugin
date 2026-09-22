@@ -420,7 +420,7 @@ public class CSCGlobalCAPluginTests
         {
             Results = new List<CertificateResponse>
             {
-                new CertificateResponse { Uuid = "u1", Status = "ACTIVE", Certificate = apiBase64, CertificateType = "4" }
+                new CertificateResponse { Uuid = "u1", Status = "ACTIVE", Certificate = apiBase64, CertificateType = "CSC TrustedSecure DV" }
             }
         });
 
@@ -432,7 +432,10 @@ public class CSCGlobalCAPluginTests
         var items = buffer.ToArray();
         Assert.Single(items);
         Assert.Equal("u1", items[0].CARequestID);
-        Assert.Equal("CSC TrustedSecure Domain Validated SSL", items[0].ProductID);
+        // CSC's list/sync API returns the certificate's current product name directly, so the
+        // synced ProductID must match it verbatim (and therefore match the canonical Certificate
+        // Profile name configured in Command) rather than going through a name-remapping table.
+        Assert.Equal("CSC TrustedSecure DV", items[0].ProductID);
     }
 
     [Fact]

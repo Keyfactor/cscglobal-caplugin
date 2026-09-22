@@ -434,7 +434,11 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
             if (certStatus == Convert.ToInt32(EndEntityStatus.GENERATED) ||
                 certStatus == Convert.ToInt32(EndEntityStatus.REVOKED))
             {
-                var productId = _requestManager.MapCertificateTypeToProductId(currentResponseItem.CertificateType);
+                // CSC's list/sync API returns the certificate's current product name directly
+                // (e.g. "CSC TrustedSecure DV"), which already matches the canonical Product ID
+                // used for enrollment - no reverse lookup needed, same as the CSC-name-is-truth
+                // approach taken on feature/ev-ov-dv-multiname-certs.
+                var productId = currentResponseItem.CertificateType ?? "CscGlobal";
 
                 Logger.LogTrace("SyncCertificates: UUID={Uuid} qualifies for sync. CertificateType='{CertType}' -> ProductId='{ProductId}'",
                     currentResponseItem.Uuid, currentResponseItem.CertificateType ?? "(null)", productId);

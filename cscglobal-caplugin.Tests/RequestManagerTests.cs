@@ -402,7 +402,7 @@ public class RequestManagerTests
     }
 
     // ---------------------------------------------------------------------
-    // MapReturnStatus / MapCertificateTypeToProductId
+    // MapReturnStatus
     // ---------------------------------------------------------------------
 
     [Theory]
@@ -415,28 +415,6 @@ public class RequestManagerTests
     public void MapReturnStatus_MapsExpectedStatus(string? cscStatus, Keyfactor.PKI.Enums.EJBCA.EndEntityStatus expected)
     {
         Assert.Equal((int)expected, Manager.MapReturnStatus(cscStatus!));
-    }
-
-    [Theory]
-    [InlineData("4", "CSC TrustedSecure Domain Validated SSL")]
-    [InlineData("CSC TrustedSecure Domain Validated SSL", "CSC TrustedSecure Domain Validated SSL")]
-    [InlineData("CSC Trusted Secure Domain Validated SSL", "CSC TrustedSecure Domain Validated SSL")]
-    [InlineData("9", "CSC TrustedSecure DV Wildcard, Multiple Names")]
-    public void MapCertificateTypeToProductId_KnownValue_MapsToProductId(string cscType, string expectedProductId)
-    {
-        Assert.Equal(expectedProductId, Manager.MapCertificateTypeToProductId(cscType));
-    }
-
-    [Fact]
-    public void MapCertificateTypeToProductId_UnknownValue_PassesThrough()
-    {
-        Assert.Equal("SomeUnknownType", Manager.MapCertificateTypeToProductId("SomeUnknownType"));
-    }
-
-    [Fact]
-    public void MapCertificateTypeToProductId_Null_ReturnsFallback()
-    {
-        Assert.Equal("CscGlobal", Manager.MapCertificateTypeToProductId(null!));
     }
 
     // ---------------------------------------------------------------------
