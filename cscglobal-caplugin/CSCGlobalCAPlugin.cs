@@ -1011,8 +1011,12 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
             return;
         }
 
+        // One EnrollmentContext entry per step (rather than one entry holding the whole
+        // multi-line summary) so Command's bulleted rendering shows a readable line per step
+        // instead of a single run-on blob.
         result.EnrollmentContext ??= new Dictionary<string, string>();
-        result.EnrollmentContext["Flow Summary"] = flow.GetSummary();
+        foreach (var entry in flow.GetSummaryEntries())
+            result.EnrollmentContext[entry.Key] = entry.Value;
     }
 
     //done
