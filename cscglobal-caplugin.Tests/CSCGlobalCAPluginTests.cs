@@ -837,6 +837,56 @@ public class CSCGlobalCAPluginTests
 
         Assert.Equal((int)EndEntityStatus.EXTERNALVALIDATION, result.Status);
         Assert.Equal("uuid-new", result.CARequestID);
+        // Command's enrollment UI doesn't surface StatusMessage on a successful/pending result -
+        // only EnrollmentContext is - so the flow summary must be attached there instead.
+        Assert.NotNull(result.EnrollmentContext);
+        Assert.True(result.EnrollmentContext.ContainsKey("Flow Summary"));
+        Assert.Contains("Enroll-New", result.EnrollmentContext["Flow Summary"]);
+    }
+
+    [Fact]
+    public async Task Enroll_New_SuccessWithDcvDetails_KeepsDcvEntriesAlongsideFlowSummary()
+    {
+        var mockClient = new Mock<ICscGlobalClient>();
+        mockClient.Setup(c => c.SubmitGetCustomFields()).ReturnsAsync(new List<GetCustomField>());
+        mockClient.Setup(c => c.SubmitRegistrationAsync(It.IsAny<RegistrationRequest>())).ReturnsAsync(new RegistrationResponse
+        {
+            Result = new Result
+            {
+                CommonName = "dcv.example.com",
+                Status = new Status { Uuid = "uuid-dcv" },
+                DcvDetails = new List<DcvDetail>
+                {
+                    new DcvDetail { CName = new CName { Name = "_dnsauth.example.com", Value = "token" } }
+                }
+            }
+        });
+
+        var plugin = MakePlugin(mockClient);
+        var result = await plugin.Enroll("csr", "CN=test", new Dictionary<string, string[]>(), ProductInfo(),
+            RequestFormat.PKCS10, EnrollmentType.New);
+
+        Assert.Equal("token", result.EnrollmentContext["_dnsauth.example.com"]);
+        Assert.True(result.EnrollmentContext.ContainsKey("Flow Summary"));
+    }
+
+    [Fact]
+    public async Task Enroll_New_RegistrationErrorFromCsc_PrependsFlowSummaryToStatusMessage()
+    {
+        var mockClient = new Mock<ICscGlobalClient>();
+        mockClient.Setup(c => c.SubmitGetCustomFields()).ReturnsAsync(new List<GetCustomField>());
+        mockClient.Setup(c => c.SubmitRegistrationAsync(It.IsAny<RegistrationRequest>())).ReturnsAsync(new RegistrationResponse
+        {
+            RegistrationError = new RegistrationError { Description = "Open order in progress" }
+        });
+
+        var plugin = MakePlugin(mockClient);
+        var result = await plugin.Enroll("csr", "CN=test", new Dictionary<string, string[]>(), ProductInfo(),
+            RequestFormat.PKCS10, EnrollmentType.New);
+
+        Assert.Equal((int)EndEntityStatus.FAILED, result.Status);
+        Assert.Contains("Enroll-New", result.StatusMessage);
+        Assert.Contains("Open order in progress", result.StatusMessage);
     }
 
     [Fact]
