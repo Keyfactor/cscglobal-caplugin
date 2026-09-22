@@ -124,6 +124,42 @@ public sealed class FlowLogger : IDisposable
         return this;
     }
 
+    /// <summary>
+    ///     Record an async step whose own return value becomes the step's detail - unlike the
+    ///     <paramref name="detail" /> parameter on the other overload (which is evaluated before
+    ///     the action runs and so can't reflect anything the action decided), this reflects what
+    ///     actually happened during execution (e.g. why a conditional step was a no-op).
+    /// </summary>
+    public async Task<FlowLogger> StepAsync(string name, Func<Task<string>> action)
+    {
+        var sw = Stopwatch.StartNew();
+        var step = new FlowStep { Name = name };
+        try
+        {
+            _logger.LogTrace("  [{FlowName}] {StepName} ...", _flowName, name);
+            var detail = await action();
+            sw.Stop();
+            step.Status = FlowStepStatus.Success;
+            step.ElapsedMs = sw.ElapsedMilliseconds;
+            step.Detail = detail;
+            AddStep(step);
+            _logger.LogTrace("  [{FlowName}] {StepName} ... OK ({Elapsed}ms){Detail}",
+                _flowName, name, sw.ElapsedMilliseconds, detail != null ? $" {detail}" : "");
+        }
+        catch (Exception ex)
+        {
+            sw.Stop();
+            step.Status = FlowStepStatus.Failed;
+            step.ElapsedMs = sw.ElapsedMilliseconds;
+            step.Detail = ex.Message;
+            AddStep(step);
+            _logger.LogTrace("  [{FlowName}] {StepName} ... FAILED ({Elapsed}ms): {Error}",
+                _flowName, name, sw.ElapsedMilliseconds, ex.Message);
+            throw;
+        }
+        return this;
+    }
+
     /// <summary>Record a failed step without throwing.</summary>
     public FlowLogger Fail(string name, string reason = null)
     {

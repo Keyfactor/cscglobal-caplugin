@@ -1048,10 +1048,14 @@ public class CSCGlobalCAPluginTests
             [EnrollmentConfigConstants.DomainControlValidationMethod] = "EMAIL"
         });
 
-        await plugin.Enroll("csr", "CN=test", new Dictionary<string, string[]>(), productInfo,
+        var result = await plugin.Enroll("csr", "CN=test", new Dictionary<string, string[]>(), productInfo,
             RequestFormat.PKCS10, EnrollmentType.New);
 
         mockFactory.Verify(f => f.ResolveDomainValidator(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+        // The DcvAutoPublish step must explain *why* it was a no-op for a non-CNAME method,
+        // rather than showing a bare [OK] under a CNAME-sounding step name.
+        var publishStep = result.EnrollmentContext.Single(e => e.Key.Contains("DcvAutoPublish"));
+        Assert.Contains("not CNAME", publishStep.Value);
     }
 
     [Fact]

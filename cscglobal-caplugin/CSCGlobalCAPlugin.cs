@@ -698,10 +698,7 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
                     var enrollResult = _requestManager.GetEnrollmentResult(enrollmentResponse);
                     flow.Step("MapResult", $"Status={enrollResult?.Status}, ID={enrollResult?.CARequestID ?? "(null)"}");
 
-                    await flow.StepAsync("PublishCnameDcv", async () =>
-                    {
-                        await TryPublishCnameDcvAsync(productInfo, enrollResult);
-                    });
+                    await flow.StepAsync("DcvAutoPublish", () => TryPublishCnameDcvAsync(productInfo, enrollResult));
 
                     EnrollmentResult? newPolled = null;
                     await flow.StepAsync("PollForIssuance", async () =>
@@ -1388,19 +1385,21 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
     ///     resolves for its domain. No-op if the factory wasn't injected, the cert isn't using CNAME
     ///     validation, or the response contains no CNAME details. Failures are logged but never thrown —
     ///     manual publishing remains a fallback so the enrollment result is still returned to Keyfactor.
+    ///     Returns a short description of what happened (published/skipped/why), surfaced as the
+    ///     flow step's detail so a no-op for non-CNAME methods doesn't look unexplained.
     /// </summary>
-    private async Task TryPublishCnameDcvAsync(EnrollmentProductInfo productInfo, EnrollmentResult? enrollResult)
+    private async Task<string> TryPublishCnameDcvAsync(EnrollmentProductInfo productInfo, EnrollmentResult? enrollResult)
     {
         if (_validatorFactory == null)
         {
             Logger.LogTrace("TryPublishCnameDcvAsync: no IDomainValidatorFactory was injected, skipping auto-publish.");
-            return;
+            return "skipped - no DNS validator factory injected";
         }
 
         if (enrollResult?.EnrollmentContext == null || enrollResult.EnrollmentContext.Count == 0)
         {
             Logger.LogTrace("TryPublishCnameDcvAsync: no CNAME entries in EnrollmentContext, skipping.");
-            return;
+            return "skipped - no DCV entries returned by CSC";
         }
 
         var dcvMethod = productInfo?.ProductParameters != null
@@ -1412,7 +1411,7 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
             !string.Equals(dcvMethod, "CNAME", StringComparison.OrdinalIgnoreCase))
         {
             Logger.LogTrace("TryPublishCnameDcvAsync: DCV method '{Method}' is not CNAME, skipping auto-publish.", dcvMethod ?? "(null)");
-            return;
+            return $"skipped - DCV method is '{dcvMethod ?? "(none)"}', not CNAME";
         }
 
         Logger.LogInformation(
@@ -1498,6 +1497,9 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
         Logger.LogInformation(
             "TryPublishCnameDcvAsync: complete. Published={Published}, Failed={Failed}, Unresolved={Unresolved}",
             successCount, failCount, unresolvedCount);
+
+        return $"published {successCount}, failed {failCount}, unresolved {unresolvedCount} " +
+            $"of {enrollResult.EnrollmentContext.Count} CNAME record(s)";
     }
 
     //Trying to fix leaf extraction
