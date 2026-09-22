@@ -81,6 +81,34 @@ public class CSCGlobalCAPluginTests
     }
 
     [Fact]
+    public void Initialize_MissingEnabled_DefaultsToTrue()
+    {
+        var plugin = new CSCGlobalCAPlugin();
+        plugin.Initialize(new FakeConfigProvider { CAConnectionData = ValidConnectionData() }, Mock.Of<ICertificateDataReader>());
+        Assert.True(plugin.Enabled);
+    }
+
+    [Fact]
+    public void Initialize_ExplicitlyDisabled_ParsesFalse()
+    {
+        var data = ValidConnectionData();
+        data[Constants.Enabled] = "false";
+        var plugin = new CSCGlobalCAPlugin();
+        plugin.Initialize(new FakeConfigProvider { CAConnectionData = data }, Mock.Of<ICertificateDataReader>());
+        Assert.False(plugin.Enabled);
+    }
+
+    [Fact]
+    public void Initialize_UnparsableEnabled_DefaultsToTrue()
+    {
+        var data = ValidConnectionData();
+        data[Constants.Enabled] = "not-a-bool";
+        var plugin = new CSCGlobalCAPlugin();
+        plugin.Initialize(new FakeConfigProvider { CAConnectionData = data }, Mock.Of<ICertificateDataReader>());
+        Assert.True(plugin.Enabled);
+    }
+
+    [Fact]
     public void Initialize_ValidSyncFilterDays_ParsesValue()
     {
         var data = ValidConnectionData();
@@ -384,6 +412,22 @@ public class CSCGlobalCAPluginTests
         Assert.True(buffer.IsAddingCompleted);
     }
 
+    [Fact]
+    public async Task Synchronize_Disabled_CompletesBufferWithoutCallingClient()
+    {
+        var mockClient = new Mock<ICscGlobalClient>();
+        var data = ValidConnectionData();
+        data[Constants.Enabled] = "false";
+        var plugin = MakePlugin(mockClient, connectionData: data);
+        var buffer = new BlockingCollection<AnyCAPluginCertificate>();
+
+        await plugin.Synchronize(buffer, null, true, CancellationToken.None);
+
+        Assert.True(buffer.IsAddingCompleted);
+        Assert.Empty(buffer);
+        mockClient.Verify(c => c.SubmitCertificateListRequestAsync(It.IsAny<string?>()), Times.Never);
+    }
+
     // ---------------------------------------------------------------------
     // Revoke
     // ---------------------------------------------------------------------
@@ -435,6 +479,18 @@ public class CSCGlobalCAPluginTests
         Assert.Equal((int)EndEntityStatus.FAILED, status);
     }
 
+    [Fact]
+    public async Task Revoke_Disabled_ThrowsInvalidOperationException()
+    {
+        var mockClient = new Mock<ICscGlobalClient>();
+        var data = ValidConnectionData();
+        data[Constants.Enabled] = "false";
+        var plugin = MakePlugin(mockClient, connectionData: data);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => plugin.Revoke(Guid.NewGuid().ToString(), "AB12", 0));
+        mockClient.Verify(c => c.SubmitRevokeCertificateAsync(It.IsAny<string>()), Times.Never);
+    }
+
     // ---------------------------------------------------------------------
     // Enroll
     // ---------------------------------------------------------------------
@@ -445,6 +501,22 @@ public class CSCGlobalCAPluginTests
         var plugin = MakePlugin();
         await Assert.ThrowsAsync<ArgumentNullException>(() =>
             plugin.Enroll("csr", "subject", new Dictionary<string, string[]>(), null!, RequestFormat.PKCS10, EnrollmentType.New));
+    }
+
+    [Fact]
+    public async Task Enroll_Disabled_ReturnsFailedWithoutCallingClient()
+    {
+        var mockClient = new Mock<ICscGlobalClient>();
+        var data = ValidConnectionData();
+        data[Constants.Enabled] = "false";
+        var plugin = MakePlugin(mockClient, connectionData: data);
+
+        var result = await plugin.Enroll("csr", "CN=test", new Dictionary<string, string[]>(), ProductInfo(),
+            RequestFormat.PKCS10, EnrollmentType.New);
+
+        Assert.Equal((int)EndEntityStatus.FAILED, result!.Status);
+        Assert.Contains("Disabled", result.StatusMessage);
+        mockClient.Verify(c => c.SubmitGetCustomFields(), Times.Never);
     }
 
     [Fact]
@@ -972,6 +1044,15 @@ public class CSCGlobalCAPluginTests
     }
 
     [Fact]
+    public async Task Ping_Disabled_DoesNotThrow()
+    {
+        var data = ValidConnectionData();
+        data[Constants.Enabled] = "false";
+        var plugin = MakePlugin(connectionData: data);
+        await plugin.Ping();
+    }
+
+    [Fact]
     public async Task ValidateCAConnectionInfo_NullConnectionInfo_DoesNotThrow()
     {
         var plugin = MakePlugin();
@@ -983,6 +1064,13 @@ public class CSCGlobalCAPluginTests
     {
         var plugin = MakePlugin();
         await plugin.ValidateCAConnectionInfo(new Dictionary<string, object> { ["Key"] = "Value" });
+    }
+
+    [Fact]
+    public async Task ValidateCAConnectionInfo_ExplicitlyDisabled_DoesNotThrow()
+    {
+        var plugin = MakePlugin();
+        await plugin.ValidateCAConnectionInfo(new Dictionary<string, object> { [Constants.Enabled] = "false" });
     }
 
     [Fact]
@@ -1014,6 +1102,25 @@ public class CSCGlobalCAPluginTests
         await plugin.ValidateProductInfo(ProductInfo("CSC TrustedSecure UC Certificate"), new Dictionary<string, object>());
     }
 
+    [Fact]
+    public async Task ValidateProductInfo_DisabledConnector_SkipsValidationEvenForUnknownProduct()
+    {
+        var plugin = MakePlugin();
+        var connectionInfo = new Dictionary<string, object> { [Constants.Enabled] = "false" };
+
+        // Should not throw even though the product is unknown - Enabled=false short-circuits
+        // validation entirely (pre-configuration workflow).
+        await plugin.ValidateProductInfo(ProductInfo("Not A Real Product"), connectionInfo);
+    }
+
+    [Fact]
+    public async Task ValidateProductInfo_NullConnectionInfo_TreatsAsEnabled()
+    {
+        var plugin = MakePlugin();
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+            plugin.ValidateProductInfo(ProductInfo("Not A Real Product"), null!));
+    }
+
     // ---------------------------------------------------------------------
     // GetCAConnectorAnnotations / GetTemplateParameterAnnotations / GetProductIds
     // ---------------------------------------------------------------------
@@ -1024,7 +1131,8 @@ public class CSCGlobalCAPluginTests
         var plugin = MakePlugin();
         var annotations = plugin.GetCAConnectorAnnotations();
 
-        Assert.Equal(6, annotations.Count);
+        Assert.Equal(7, annotations.Count);
+        Assert.Contains(Constants.Enabled, annotations.Keys);
         Assert.Contains(Constants.CscGlobalUrl, annotations.Keys);
         Assert.Contains(Constants.CscGlobalApiKey, annotations.Keys);
         Assert.Contains(Constants.BearerToken, annotations.Keys);

@@ -9,6 +9,7 @@ namespace Keyfactor.Extensions.CAPlugin.CSCGlobal;
 
 public class Constants
 {
+    public static string Enabled = "Enabled";
     public static string CscGlobalUrl = "CscGlobalUrl";
     public static string CscGlobalApiKey = "ApiKey";
     public static string BearerToken = "BearerToken";

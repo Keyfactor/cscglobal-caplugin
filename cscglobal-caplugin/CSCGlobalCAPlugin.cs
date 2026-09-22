@@ -42,6 +42,14 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
 
     public int SyncFilterDays { get; set; }
 
+    /// <summary>
+    ///     Whether the CA is enabled. When false, operations (Enroll, Revoke, Synchronize, Ping)
+    ///     reject or skip cleanly instead of calling the CSC Global API, so a CA record can be
+    ///     created and saved before valid API credentials are available (or intentionally
+    ///     disabled later without deleting the CA connection). Defaults to true.
+    /// </summary>
+    public bool Enabled { get; set; } = true;
+
     // CSC's order is a fixed 1-year paid subscription that a single cert renewal doesn't reset,
     // so a shorter-lived cert (e.g. ~200 days) can come up for renewal well before its order
     // actually expires. RenewOrReissue uses this window (days before order expiry) to decide
@@ -55,6 +63,16 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
         if (configProvider == null) throw new ArgumentNullException(nameof(configProvider));
         _certificateDataReader = certificateDataReader ?? throw new ArgumentNullException(nameof(certificateDataReader));
         Config = configProvider;
+
+        Enabled = true; // default
+        if (configProvider.CAConnectionData.TryGetValue(Constants.Enabled, out var enabledObj))
+        {
+            if (bool.TryParse(enabledObj?.ToString(), out var parsed))
+                Enabled = parsed;
+            else
+                Logger.LogWarning($"Could not parse {Constants.Enabled} value '{enabledObj}' as a bool; defaulting to true");
+        }
+        Logger.LogInformation("CA is {State}.", Enabled ? "Enabled" : "Disabled");
 
         if (configProvider.CAConnectionData.ContainsKey(Constants.SyncFilterDays))
         {
@@ -135,6 +153,15 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
         Logger.LogTrace($"Full Sync? {fullSync.ToString()}");
         Logger.MethodEntry();
         using var flow = new FlowLogger(Logger, "Synchronize");
+
+        if (!Enabled)
+        {
+            Logger.LogWarning("The CA is currently in the Disabled state. It must be Enabled to perform operations. Skipping Synchronize.");
+            blockingBuffer.CompleteAdding();
+            Logger.MethodExit(LogLevel.Debug);
+            return;
+        }
+
         try
         {
             if (fullSync)
@@ -253,6 +280,13 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
     {
         Logger.MethodEntry(LogLevel.Debug);
         using var flow = new FlowLogger(Logger, "Revoke");
+
+        if (!Enabled)
+        {
+            Logger.LogWarning("The CA is currently in the Disabled state. It must be Enabled to perform operations. Rejecting Revoke.");
+            throw new InvalidOperationException("The CSC Global CA is in the Disabled state. Enable it to perform revocations.");
+        }
+
         try
         {
             Logger.LogInformation($"Starting Revoke for CA request ID {caRequestID}, reason {revocationReason}");
@@ -303,6 +337,17 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
         Logger.MethodEntry(LogLevel.Debug);
         Logger.LogInformation($"Starting Enroll for product {productInfo.ProductID}, enrollment type {enrollmentType}");
         using var flow = new FlowLogger(Logger, "Enroll");
+
+        if (!Enabled)
+        {
+            Logger.LogWarning("The CA is currently in the Disabled state. It must be Enabled to perform operations. Rejecting Enroll.");
+            flow.Fail("Enroll", "CA is Disabled");
+            return new EnrollmentResult
+            {
+                Status = (int)EndEntityStatus.FAILED,
+                StatusMessage = $"{flow.GetSummary()}\n\nThe CSC Global CA is in the Disabled state. Enable it to perform enrollments."
+            };
+        }
 
         try
         {
@@ -554,6 +599,14 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
     public async Task Ping()
     {
         Logger.MethodEntry();
+
+        if (!Enabled)
+        {
+            Logger.LogWarning("The CA is currently in the Disabled state. It must be Enabled to perform operations. Skipping Ping.");
+            Logger.MethodExit();
+            return;
+        }
+
         try
         {
             Logger.LogInformation("Ping request received");
@@ -572,6 +625,23 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
     {
         Logger.MethodEntry(LogLevel.Debug);
         Logger.LogDebug($"Validating CA connection info with {connectionInfo?.Count ?? 0} entries");
+
+        // Honor the Enabled flag from the incoming connectionInfo (which may differ from
+        // Initialize's snapshot when the operator is currently editing the CA). If disabled,
+        // skip validation so the CA can be saved without valid credentials.
+        var incomingEnabled = true;
+        if (connectionInfo != null &&
+            connectionInfo.TryGetValue(Constants.Enabled, out var enabledObj) &&
+            bool.TryParse(enabledObj?.ToString(), out var parsed))
+            incomingEnabled = parsed;
+
+        if (!incomingEnabled)
+        {
+            Logger.LogWarning("The CA is currently in the Disabled state. It must be Enabled to perform operations. Skipping ValidateCAConnectionInfo.");
+            Logger.MethodExit(LogLevel.Debug);
+            return;
+        }
+
         Logger.MethodExit(LogLevel.Debug);
     }
 
@@ -580,6 +650,22 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
         Dictionary<string, object> connectionInfo)
     {
         Logger.MethodEntry(LogLevel.Debug);
+
+        // Honor the Enabled flag from the incoming connectionInfo. If the CA is disabled, skip
+        // validation so a template can be saved on a disabled CA (pre-configuration workflow).
+        var incomingEnabled = true;
+        if (connectionInfo != null &&
+            connectionInfo.TryGetValue(Constants.Enabled, out var enabledObj) &&
+            bool.TryParse(enabledObj?.ToString(), out var parsed))
+            incomingEnabled = parsed;
+
+        if (!incomingEnabled)
+        {
+            Logger.LogWarning("The CA is currently in the Disabled state. It must be Enabled to perform operations. Skipping ValidateProductInfo.");
+            Logger.MethodExit(LogLevel.Debug);
+            return;
+        }
+
         var certType = ProductIDs.productIds.Find(x =>
             x.Equals(productInfo.ProductID, StringComparison.InvariantCultureIgnoreCase));
 
@@ -601,6 +687,13 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
     {
         return new Dictionary<string, PropertyConfigInfo>
         {
+            [Constants.Enabled] = new()
+            {
+                Comments = "Whether the CA is enabled. When false, Enroll/Revoke/Synchronize/Ping reject or skip cleanly instead of calling the CSC Global API. Default is true.",
+                Hidden = false,
+                DefaultValue = "true",
+                Type = "String"
+            },
             [Constants.CscGlobalUrl] = new()
             {
                 Comments = "CSCGlobal API URL",
