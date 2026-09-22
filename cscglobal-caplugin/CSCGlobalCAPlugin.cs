@@ -63,7 +63,9 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
         _validatorFactory = validatorFactory;
     }
 
-    private ICscGlobalClient CscGlobalClient { get; set; }
+    // internal (not private) purely so the test project can inject a mock via
+    // InternalsVisibleTo, instead of hitting the real CSC Global API in unit tests.
+    internal ICscGlobalClient CscGlobalClient { get; set; }
 
     /// <summary>
     ///     Whether the CA is enabled. When false, the plugin returns early from Ping,
@@ -432,7 +434,11 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
             if (certStatus == Convert.ToInt32(EndEntityStatus.GENERATED) ||
                 certStatus == Convert.ToInt32(EndEntityStatus.REVOKED))
             {
-                var productId = _requestManager.MapCertificateTypeToProductId(currentResponseItem.CertificateType);
+                // CSC's list/sync API returns the certificate's current product name directly
+                // (e.g. "CSC TrustedSecure DV"), which already matches the canonical Product ID
+                // used for enrollment - no reverse lookup needed, same as the CSC-name-is-truth
+                // approach taken on feature/ev-ov-dv-multiname-certs.
+                var productId = currentResponseItem.CertificateType ?? "CscGlobal";
 
                 Logger.LogTrace("SyncCertificates: UUID={Uuid} qualifies for sync. CertificateType='{CertType}' -> ProductId='{ProductId}'",
                     currentResponseItem.Uuid, currentResponseItem.CertificateType ?? "(null)", productId);
@@ -621,17 +627,13 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
 
         flow.Step("CheckPriorCertSN", () =>
         {
-            if (productInfo.ProductParameters.ContainsKey("priorcertsn"))
+            // Command sends this key as "PriorCertSN" (proper case) - a prior version of this
+            // check gated on "priorcertsn" (lowercase) instead, which Command never actually
+            // sends, so this block silently never ran and PriorCertSN was never populated.
+            if (productInfo.ProductParameters.ContainsKey("PriorCertSN"))
             {
-                if (productInfo.ProductParameters.ContainsKey("PriorCertSN"))
-                {
-                    priorSn = productInfo.ProductParameters["PriorCertSN"];
-                    Logger.LogDebug("Enroll: Prior cert SN: '{PriorSn}'", priorSn ?? "(null)");
-                }
-                else
-                {
-                    Logger.LogWarning("Enroll: 'priorcertsn' key exists but 'PriorCertSN' (case-sensitive) not found.");
-                }
+                priorSn = productInfo.ProductParameters["PriorCertSN"];
+                Logger.LogDebug("Enroll: Prior cert SN: '{PriorSn}'", priorSn ?? "(null)");
             }
         }, string.IsNullOrEmpty(priorSn) ? "none" : $"SN={priorSn}");
 
@@ -1079,17 +1081,14 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
             throw new ArgumentException("ProductID cannot be null or empty.", nameof(productInfo));
         }
 
-        var certType = ProductIDs.productIds.Find(x =>
-            x.Equals(productInfo.ProductID, StringComparison.InvariantCultureIgnoreCase));
-
-        if (certType == null)
+        if (!_requestManager.IsKnownProductId(productInfo.ProductID))
         {
             Logger.LogError("ValidateProductInfo: cannot find product ID '{ProductId}'. Known IDs: [{KnownIds}]",
                 productInfo.ProductID, string.Join(", ", ProductIDs.productIds));
             throw new ArgumentException($"Cannot find {productInfo.ProductID}", "ProductId");
         }
 
-        Logger.LogInformation("Validated {CertType} configured for AnyGateway", certType);
+        Logger.LogInformation("Validated {ProductId} configured for AnyGateway", productInfo.ProductID);
         Logger.MethodExit(LogLevel.Debug);
     }
 
