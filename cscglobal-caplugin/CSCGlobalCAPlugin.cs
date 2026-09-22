@@ -678,8 +678,8 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
                             flow.Fail("ParseResponse", "API returned null");
                             return new EnrollmentResult
                             {
-                                Status = 30,
-                                StatusMessage = "Enrollment failed: CSC API returned a null response."
+                                Status = (int)EndEntityStatus.FAILED,
+                                StatusMessage = $"{flow.GetSummary()}\n\nEnrollment failed: CSC API returned a null response."
                             };
                         }
                         flow.Step("ParseResponse", $"error={enrollmentResponse.RegistrationError != null}");
@@ -690,8 +690,8 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
                         flow.Fail("RejectExpiredRenew", "PriorCertSN present on New enrollment");
                         return new EnrollmentResult
                         {
-                            Status = 30,
-                            StatusMessage = "You cannot renew an expired cert please perform an new enrollment."
+                            Status = (int)EndEntityStatus.FAILED,
+                            StatusMessage = $"{flow.GetSummary()}\n\nYou cannot renew an expired cert please perform an new enrollment."
                         };
                     }
 
@@ -726,8 +726,8 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
                         flow.Fail("ValidatePriorSN", "PriorCertSN is empty");
                         return new EnrollmentResult
                         {
-                            Status = 30,
-                            StatusMessage = "RenewOrReissue failed: PriorCertSN is required but was not provided."
+                            Status = (int)EndEntityStatus.FAILED,
+                            StatusMessage = $"{flow.GetSummary()}\n\nRenewOrReissue failed: PriorCertSN is required but was not provided."
                         };
                     }
 
@@ -742,8 +742,8 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
                         flow.Fail("ValidateOrderId", $"no order found for SN={priorSn}");
                         return new EnrollmentResult
                         {
-                            Status = 30,
-                            StatusMessage = $"RenewOrReissue failed: could not find order ID for serial number '{priorSn}'."
+                            Status = (int)EndEntityStatus.FAILED,
+                            StatusMessage = $"{flow.GetSummary()}\n\nRenewOrReissue failed: could not find order ID for serial number '{priorSn}'."
                         };
                     }
 
@@ -752,8 +752,8 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
                         flow.Fail("ValidateOrderId", $"order_id too short ({order_id.Length} chars)");
                         return new EnrollmentResult
                         {
-                            Status = 30,
-                            StatusMessage = $"RenewOrReissue failed: order ID '{order_id}' is too short to extract a UUID."
+                            Status = (int)EndEntityStatus.FAILED,
+                            StatusMessage = $"{flow.GetSummary()}\n\nRenewOrReissue failed: order ID '{order_id}' is too short to extract a UUID."
                         };
                     }
                     flow.Step("ValidateOrderId", $"orderId={order_id}");
@@ -801,8 +801,8 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
                             flow.Fail("FallbackExpiryCheck", fallbackEx.Message);
                             return new EnrollmentResult
                             {
-                                Status = 30,
-                                StatusMessage = $"RenewOrReissue failed: unable to determine renewal status for order '{order_id}'. {fallbackEx.Message}"
+                                Status = (int)EndEntityStatus.FAILED,
+                                StatusMessage = $"{flow.GetSummary()}\n\nRenewOrReissue failed: unable to determine renewal status for order '{order_id}'. {fallbackEx.Message}"
                             };
                         }
                     }
@@ -825,8 +825,8 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
                                 flow.Fail("ValidateRenewalUUID", "could not resolve PriorCertSN");
                                 return new EnrollmentResult
                                 {
-                                    Status = 30,
-                                    StatusMessage = "Renewal failed: could not resolve prior certificate serial number to a request ID."
+                                    Status = (int)EndEntityStatus.FAILED,
+                                    StatusMessage = $"{flow.GetSummary()}\n\nRenewal failed: could not resolve prior certificate serial number to a request ID."
                                 };
                             }
                             flow.Step("ValidateRenewalUUID", $"uuid={uUId}");
@@ -850,8 +850,8 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
                                 flow.Fail("ParseRenewalResponse", "API returned null");
                                 return new EnrollmentResult
                                 {
-                                    Status = 30,
-                                    StatusMessage = "Renewal failed: CSC API returned a null response."
+                                    Status = (int)EndEntityStatus.FAILED,
+                                    StatusMessage = $"{flow.GetSummary()}\n\nRenewal failed: CSC API returned a null response."
                                 };
                             }
 
@@ -871,9 +871,9 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
                         flow.Fail("MissingEnrollmentParams", "Applicant Last Name not present — one-click renew unavailable");
                         return new EnrollmentResult
                         {
-                            Status = 30,
+                            Status = (int)EndEntityStatus.FAILED,
                             StatusMessage =
-                                "One click Renew Is Not Available for this Certificate Type.  Use the configure button instead."
+                                $"{flow.GetSummary()}\n\nOne click Renew Is Not Available for this Certificate Type.  Use the configure button instead."
                         };
                     }
 
@@ -892,8 +892,8 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
                             flow.Fail("ValidateReissueRequestId", "could not resolve PriorCertSN");
                             return new EnrollmentResult
                             {
-                                Status = 30,
-                                StatusMessage = "Reissue failed: could not resolve prior certificate serial number to a request ID."
+                                Status = (int)EndEntityStatus.FAILED,
+                                StatusMessage = $"{flow.GetSummary()}\n\nReissue failed: could not resolve prior certificate serial number to a request ID."
                             };
                         }
 
@@ -902,8 +902,8 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
                             flow.Fail("ValidateReissueRequestId", $"requestid too short ({requestid.Length} chars)");
                             return new EnrollmentResult
                             {
-                                Status = 30,
-                                StatusMessage = $"Reissue failed: request ID '{requestid}' is too short to extract a UUID."
+                                Status = (int)EndEntityStatus.FAILED,
+                                StatusMessage = $"{flow.GetSummary()}\n\nReissue failed: request ID '{requestid}' is too short to extract a UUID."
                             };
                         }
 
@@ -929,8 +929,8 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
                             flow.Fail("ParseReissueResponse", "API returned null");
                             return new EnrollmentResult
                             {
-                                Status = 30,
-                                StatusMessage = "Reissue failed: CSC API returned a null response."
+                                Status = (int)EndEntityStatus.FAILED,
+                                StatusMessage = $"{flow.GetSummary()}\n\nReissue failed: CSC API returned a null response."
                             };
                         }
 
@@ -950,17 +950,17 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
                     flow.Fail("MissingEnrollmentParams", "Applicant Last Name not present — one-click reissue unavailable");
                     return new EnrollmentResult
                     {
-                        Status = 30,
+                        Status = (int)EndEntityStatus.FAILED,
                         StatusMessage =
-                            "One click Renew Is Not Available for this Certificate Type.  Use the configure button instead."
+                            $"{flow.GetSummary()}\n\nOne click Reissue Is Not Available for this Certificate Type.  Use the configure button instead."
                     };
 
                 default:
                     flow.Fail("UnhandledType", $"enrollmentType={enrollmentType}");
                     return new EnrollmentResult
                     {
-                        Status = 30,
-                        StatusMessage = $"Enroll failed: unhandled enrollment type '{enrollmentType}'."
+                        Status = (int)EndEntityStatus.FAILED,
+                        StatusMessage = $"{flow.GetSummary()}\n\nEnroll failed: unhandled enrollment type '{enrollmentType}'."
                     };
             }
         }
@@ -971,8 +971,8 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
             Logger.LogError(inner, "Enroll: AggregateException during {EnrollmentType}: {Message}", enrollmentType, inner?.Message ?? ae.Message);
             return new EnrollmentResult
             {
-                Status = 30,
-                StatusMessage = $"Enrollment failed with error: {inner?.Message ?? ae.Message}"
+                Status = (int)EndEntityStatus.FAILED,
+                StatusMessage = $"{flow.GetSummary()}\n\nEnrollment failed with error: {inner?.Message ?? ae.Message}"
             };
         }
         catch (Exception ex)
@@ -981,8 +981,8 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
             Logger.LogError(ex, "Enroll: unhandled exception during {EnrollmentType}: {Message}", enrollmentType, ex.Message);
             return new EnrollmentResult
             {
-                Status = 30,
-                StatusMessage = $"Enrollment failed with error: {ex.Message}"
+                Status = (int)EndEntityStatus.FAILED,
+                StatusMessage = $"{flow.GetSummary()}\n\nEnrollment failed with error: {ex.Message}"
             };
         }
     }
