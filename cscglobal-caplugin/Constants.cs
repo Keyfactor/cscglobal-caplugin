@@ -14,6 +14,7 @@ public class Constants
     public static string BearerToken = "BearerToken";
     public static string DefaultPageSize = "DefaultPageSize";
     public static string SyncFilterDays = "SyncFilterDays";
+    public static string RenewalWindowDays = "RenewalWindowDays";
 }
     
 public class ProductIDs

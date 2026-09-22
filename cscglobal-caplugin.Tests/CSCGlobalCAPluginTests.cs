@@ -108,6 +108,37 @@ public class CSCGlobalCAPluginTests
         Assert.Equal(0, plugin.SyncFilterDays);
     }
 
+    [Fact]
+    public void Initialize_ValidRenewalWindowDays_ParsesValue()
+    {
+        var data = ValidConnectionData();
+        data[Constants.RenewalWindowDays] = "45";
+        var plugin = new CSCGlobalCAPlugin();
+        plugin.Initialize(new FakeConfigProvider { CAConnectionData = data }, Mock.Of<ICertificateDataReader>());
+        Assert.Equal(45, plugin.RenewalWindowDays);
+    }
+
+    [Fact]
+    public void Initialize_MissingRenewalWindowDays_DefaultsTo30()
+    {
+        var plugin = new CSCGlobalCAPlugin();
+        plugin.Initialize(new FakeConfigProvider { CAConnectionData = ValidConnectionData() }, Mock.Of<ICertificateDataReader>());
+        Assert.Equal(30, plugin.RenewalWindowDays);
+    }
+
+    [Theory]
+    [InlineData("not-a-number")]
+    [InlineData("-5")]
+    [InlineData("0")]
+    public void Initialize_InvalidRenewalWindowDays_DefaultsTo30(string raw)
+    {
+        var data = ValidConnectionData();
+        data[Constants.RenewalWindowDays] = raw;
+        var plugin = new CSCGlobalCAPlugin();
+        plugin.Initialize(new FakeConfigProvider { CAConnectionData = data }, Mock.Of<ICertificateDataReader>());
+        Assert.Equal(30, plugin.RenewalWindowDays);
+    }
+
     // ---------------------------------------------------------------------
     // GetSingleRecord
     // ---------------------------------------------------------------------
@@ -614,6 +645,185 @@ public class CSCGlobalCAPluginTests
         Assert.Contains(result.EnrollmentContext.Keys, k => k.Contains("SubmitReissue"));
     }
 
+    // ---------------------------------------------------------------------
+    // RenewOrReissue - order-expiry-window decision ("200 day" fix)
+    //
+    // CSC's order is a fixed 1-year paid subscription; a shorter-lived certificate (e.g.
+    // ~200 days) issued under it can still have plenty of runway left on the order itself.
+    // The decision must be based on the order's expiry (orderDate + 1 year, vs
+    // RenewalWindowDays), not the certificate's own expiration date.
+    // ---------------------------------------------------------------------
+
+    [Fact]
+    public async Task Enroll_RenewOrReissue_OrderNearExpiryWithinWindow_TriggersRenewalEvenThoughCertNotExpired()
+    {
+        var uuid = Guid.NewGuid().ToString();
+        var mockClient = new Mock<ICscGlobalClient>();
+        mockClient.Setup(c => c.SubmitGetCustomFields()).ReturnsAsync(new List<GetCustomField>());
+        // Order was placed 350 days ago -> expires in 15 days, inside the default 30-day window.
+        mockClient.Setup(c => c.SubmitGetCertificateAsync(uuid)).ReturnsAsync(new CertificateResponse
+        {
+            OrderDate = DateTime.UtcNow.AddDays(-350).ToString("o")
+        });
+        mockClient.Setup(c => c.SubmitRenewalAsync(It.IsAny<RenewalRequest>())).ReturnsAsync(new RenewalResponse
+        {
+            Result = new Result { CommonName = "renewed.example.com" }
+        });
+
+        var certDataReader = new Mock<ICertificateDataReader>();
+        certDataReader.Setup(r => r.GetRequestIDBySerialNumber("ABC123")).ReturnsAsync(uuid);
+        // The certificate itself still has 60 days left - under the old cert-expiry-only
+        // logic this would incorrectly route to Reissue.
+        certDataReader.Setup(r => r.GetExpirationDateByRequestId(uuid)).Returns(DateTime.Now.AddDays(60));
+
+        var plugin = MakePlugin(mockClient, certDataReader);
+        var productInfo = ProductInfo(parameters: new Dictionary<string, string>
+        {
+            ["PriorCertSN"] = "ABC123",
+            ["Applicant Last Name"] = "Doe"
+        });
+
+        var result = await plugin.Enroll("csr", "CN=test", new Dictionary<string, string[]>(), productInfo,
+            RequestFormat.PKCS10, EnrollmentType.RenewOrReissue);
+
+        Assert.Equal((int)EndEntityStatus.EXTERNALVALIDATION, result!.Status);
+        mockClient.Verify(c => c.SubmitRenewalAsync(It.IsAny<RenewalRequest>()), Times.Once);
+        mockClient.Verify(c => c.SubmitReissueAsync(It.IsAny<ReissueRequest>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Enroll_RenewOrReissue_OrderFarFromExpiry_TriggersReissueEvenThoughCertExpirationLooksExpired()
+    {
+        var uuid = Guid.NewGuid().ToString();
+        var mockClient = new Mock<ICscGlobalClient>();
+        mockClient.Setup(c => c.SubmitGetCustomFields()).ReturnsAsync(new List<GetCustomField>());
+        // Order was placed 30 days ago -> expires in ~335 days, nowhere near the 30-day window.
+        mockClient.Setup(c => c.SubmitGetCertificateAsync(uuid)).ReturnsAsync(new CertificateResponse
+        {
+            OrderDate = DateTime.UtcNow.AddDays(-30).ToString("o")
+        });
+        mockClient.Setup(c => c.SubmitReissueAsync(It.IsAny<ReissueRequest>())).ReturnsAsync(new ReissueResponse
+        {
+            Result = new Result { CommonName = "reissued.example.com" }
+        });
+
+        var certDataReader = new Mock<ICertificateDataReader>();
+        certDataReader.Setup(r => r.GetRequestIDBySerialNumber("ABC123")).ReturnsAsync(uuid);
+        // The locally-recorded cert expiration looks expired - under the old cert-expiry-only
+        // logic this would incorrectly route to a paid Renewal.
+        certDataReader.Setup(r => r.GetExpirationDateByRequestId(uuid)).Returns(DateTime.Now.AddDays(-5));
+
+        var plugin = MakePlugin(mockClient, certDataReader);
+        var productInfo = ProductInfo(parameters: new Dictionary<string, string>
+        {
+            ["PriorCertSN"] = "ABC123",
+            ["Applicant Last Name"] = "Doe"
+        });
+
+        var result = await plugin.Enroll("csr", "CN=test", new Dictionary<string, string[]>(), productInfo,
+            RequestFormat.PKCS10, EnrollmentType.RenewOrReissue);
+
+        Assert.Equal((int)EndEntityStatus.EXTERNALVALIDATION, result!.Status);
+        mockClient.Verify(c => c.SubmitReissueAsync(It.IsAny<ReissueRequest>()), Times.Once);
+        mockClient.Verify(c => c.SubmitRenewalAsync(It.IsAny<RenewalRequest>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Enroll_RenewOrReissue_LiveCertFetchThrows_FallsBackToCertExpiryCheck()
+    {
+        var uuid = Guid.NewGuid().ToString();
+        var mockClient = new Mock<ICscGlobalClient>();
+        mockClient.Setup(c => c.SubmitGetCustomFields()).ReturnsAsync(new List<GetCustomField>());
+        mockClient.Setup(c => c.SubmitGetCertificateAsync(uuid)).ThrowsAsync(new InvalidOperationException("network error"));
+        mockClient.Setup(c => c.SubmitReissueAsync(It.IsAny<ReissueRequest>())).ReturnsAsync(new ReissueResponse
+        {
+            Result = new Result { CommonName = "reissued.example.com" }
+        });
+
+        var certDataReader = new Mock<ICertificateDataReader>();
+        certDataReader.Setup(r => r.GetRequestIDBySerialNumber("ABC123")).ReturnsAsync(uuid);
+        certDataReader.Setup(r => r.GetExpirationDateByRequestId(uuid)).Returns(DateTime.Now.AddDays(30));
+
+        var plugin = MakePlugin(mockClient, certDataReader);
+        var productInfo = ProductInfo(parameters: new Dictionary<string, string>
+        {
+            ["PriorCertSN"] = "ABC123",
+            ["Applicant Last Name"] = "Doe"
+        });
+
+        var result = await plugin.Enroll("csr", "CN=test", new Dictionary<string, string[]>(), productInfo,
+            RequestFormat.PKCS10, EnrollmentType.RenewOrReissue);
+
+        Assert.Equal((int)EndEntityStatus.EXTERNALVALIDATION, result!.Status);
+        mockClient.Verify(c => c.SubmitReissueAsync(It.IsAny<ReissueRequest>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Enroll_RenewOrReissue_LiveCertOrderDateUnparsable_FallsBackToCertExpiryCheck()
+    {
+        var uuid = Guid.NewGuid().ToString();
+        var mockClient = new Mock<ICscGlobalClient>();
+        mockClient.Setup(c => c.SubmitGetCustomFields()).ReturnsAsync(new List<GetCustomField>());
+        mockClient.Setup(c => c.SubmitGetCertificateAsync(uuid)).ReturnsAsync(new CertificateResponse { OrderDate = null });
+        mockClient.Setup(c => c.SubmitRenewalAsync(It.IsAny<RenewalRequest>())).ReturnsAsync(new RenewalResponse
+        {
+            Result = new Result { CommonName = "renewed.example.com" }
+        });
+
+        var certDataReader = new Mock<ICertificateDataReader>();
+        certDataReader.Setup(r => r.GetRequestIDBySerialNumber("ABC123")).ReturnsAsync(uuid);
+        certDataReader.Setup(r => r.GetExpirationDateByRequestId(uuid)).Returns(DateTime.Now.AddDays(-1));
+
+        var plugin = MakePlugin(mockClient, certDataReader);
+        var productInfo = ProductInfo(parameters: new Dictionary<string, string>
+        {
+            ["PriorCertSN"] = "ABC123",
+            ["Applicant Last Name"] = "Doe"
+        });
+
+        var result = await plugin.Enroll("csr", "CN=test", new Dictionary<string, string[]>(), productInfo,
+            RequestFormat.PKCS10, EnrollmentType.RenewOrReissue);
+
+        Assert.Equal((int)EndEntityStatus.EXTERNALVALIDATION, result!.Status);
+        mockClient.Verify(c => c.SubmitRenewalAsync(It.IsAny<RenewalRequest>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Enroll_RenewOrReissue_FlowSummaryIncludesRenewalAnalysisDetail()
+    {
+        var uuid = Guid.NewGuid().ToString();
+        var mockClient = new Mock<ICscGlobalClient>();
+        mockClient.Setup(c => c.SubmitGetCustomFields()).ReturnsAsync(new List<GetCustomField>());
+        mockClient.Setup(c => c.SubmitGetCertificateAsync(uuid)).ReturnsAsync(new CertificateResponse
+        {
+            OrderDate = DateTime.UtcNow.AddDays(-350).ToString("o")
+        });
+        mockClient.Setup(c => c.SubmitRenewalAsync(It.IsAny<RenewalRequest>())).ReturnsAsync(new RenewalResponse
+        {
+            Result = new Result { CommonName = "renewed.example.com" }
+        });
+
+        var certDataReader = new Mock<ICertificateDataReader>();
+        certDataReader.Setup(r => r.GetRequestIDBySerialNumber("ABC123")).ReturnsAsync(uuid);
+        certDataReader.Setup(r => r.GetExpirationDateByRequestId(uuid)).Returns(DateTime.Now.AddDays(60));
+
+        var plugin = MakePlugin(mockClient, certDataReader);
+        var productInfo = ProductInfo(parameters: new Dictionary<string, string>
+        {
+            ["PriorCertSN"] = "ABC123",
+            ["Applicant Last Name"] = "Doe"
+        });
+
+        var result = await plugin.Enroll("csr", "CN=test", new Dictionary<string, string[]>(), productInfo,
+            RequestFormat.PKCS10, EnrollmentType.RenewOrReissue);
+
+        Assert.NotNull(result.EnrollmentContext);
+        var decisionEntry = result.EnrollmentContext.Single(e => e.Key.Contains("DetermineRenewOrReissue"));
+        Assert.Contains("orderDate=", decisionEntry.Value);
+        Assert.Contains("isRenewal=True", decisionEntry.Value);
+        Assert.Contains(result.EnrollmentContext.Keys, k => k.Contains("FetchLiveCertForDecision"));
+    }
+
     [Fact]
     public async Task Enroll_New_Success_AttachesFlowSummaryAlongsideDcvContext()
     {
@@ -814,12 +1024,13 @@ public class CSCGlobalCAPluginTests
         var plugin = MakePlugin();
         var annotations = plugin.GetCAConnectorAnnotations();
 
-        Assert.Equal(5, annotations.Count);
+        Assert.Equal(6, annotations.Count);
         Assert.Contains(Constants.CscGlobalUrl, annotations.Keys);
         Assert.Contains(Constants.CscGlobalApiKey, annotations.Keys);
         Assert.Contains(Constants.BearerToken, annotations.Keys);
         Assert.Contains(Constants.DefaultPageSize, annotations.Keys);
         Assert.Contains(Constants.SyncFilterDays, annotations.Keys);
+        Assert.Contains(Constants.RenewalWindowDays, annotations.Keys);
         Assert.True(annotations[Constants.CscGlobalApiKey].Hidden);
     }
 
