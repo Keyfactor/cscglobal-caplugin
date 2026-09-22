@@ -838,10 +838,11 @@ public class CSCGlobalCAPluginTests
         Assert.Equal((int)EndEntityStatus.EXTERNALVALIDATION, result.Status);
         Assert.Equal("uuid-new", result.CARequestID);
         // Command's enrollment UI doesn't surface StatusMessage on a successful/pending result -
-        // only EnrollmentContext is - so the flow summary must be attached there instead.
+        // only EnrollmentContext is - so the flow summary must be attached there instead, one
+        // bullet per step so it renders readably rather than as a single run-on blob.
         Assert.NotNull(result.EnrollmentContext);
-        Assert.True(result.EnrollmentContext.ContainsKey("Flow Summary"));
-        Assert.Contains("Enroll-New", result.EnrollmentContext["Flow Summary"]);
+        Assert.True(result.EnrollmentContext.ContainsKey("Flow: Enroll-New"));
+        Assert.True(result.EnrollmentContext.Keys.Count(k => k.StartsWith("Flow Step ")) > 1);
     }
 
     [Fact]
@@ -867,7 +868,8 @@ public class CSCGlobalCAPluginTests
             RequestFormat.PKCS10, EnrollmentType.New);
 
         Assert.Equal("token", result.EnrollmentContext["_dnsauth.example.com"]);
-        Assert.True(result.EnrollmentContext.ContainsKey("Flow Summary"));
+        Assert.True(result.EnrollmentContext.ContainsKey("Flow: Enroll-New"));
+        Assert.True(result.EnrollmentContext.Keys.Count(k => k.StartsWith("Flow Step ")) > 1);
     }
 
     [Fact]
