@@ -711,10 +711,12 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
                     if (newPolled != null)
                     {
                         flow.Step("PollResult", "issued during poll window");
+                        AttachFlowSummary(newPolled, flow);
                         Logger.MethodExit(LogLevel.Debug);
                         return newPolled;
                     }
 
+                    AttachFlowSummary(enrollResult, flow);
                     Logger.MethodExit(LogLevel.Debug);
                     return enrollResult;
 
@@ -864,6 +866,7 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
                             {
                                 renewPolled = await TryPollForIssuedCertAsync(renewResult?.CARequestID);
                             });
+                            AttachFlowSummary(renewPolled ?? renewResult, flow);
                             Logger.MethodExit(LogLevel.Debug);
                             return renewPolled ?? renewResult;
                         }
@@ -943,6 +946,7 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
                         {
                             reissuePolled = await TryPollForIssuedCertAsync(reissueResult?.CARequestID);
                         });
+                        AttachFlowSummary(reissuePolled ?? reissueResult, flow);
                         Logger.MethodExit(LogLevel.Debug);
                         return reissuePolled ?? reissueResult;
                     }
@@ -985,6 +989,30 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
                 StatusMessage = $"{flow.GetSummary()}\n\nEnrollment failed with error: {ex.Message}"
             };
         }
+    }
+
+    // CSC Global business-level failures (e.g. "Open order in progress") come back from
+    // RequestManager as a terse StatusMessage with no context on what the plugin actually did
+    // before hitting that error - prepend the flow's step-by-step summary so the message shown
+    // to the requester in Command explains what ran, not just how it ended. Command's enrollment
+    // UI does not surface StatusMessage on a successful/pending result at all - only
+    // EnrollmentContext is - so attach the summary there instead, as its own entry alongside
+    // whatever DCV instructions came back. Must be called after TryPublishCnameDcvAsync, which
+    // treats every EnrollmentContext entry as a candidate DNS record to publish - calling this
+    // first would make it try to publish "Flow Summary" as a CNAME.
+    private static void AttachFlowSummary(EnrollmentResult? result, FlowLogger flow)
+    {
+        if (result == null)
+            return;
+
+        if (result.Status == (int)EndEntityStatus.FAILED)
+        {
+            result.StatusMessage = $"{flow.GetSummary()}\n\n{result.StatusMessage}";
+            return;
+        }
+
+        result.EnrollmentContext ??= new Dictionary<string, string>();
+        result.EnrollmentContext["Flow Summary"] = flow.GetSummary();
     }
 
     //done
