@@ -494,6 +494,16 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
                     Logger.LogTrace("SyncCertificates: fileContent was empty for UUID={Uuid}, skipping.", currentResponseItem.Uuid);
                     skippedCount++;
                 }
+                else
+                {
+                    Logger.LogTrace("SyncCertificates: fileContent was empty for UUID={Uuid}, skipping.", currentResponseItem.Uuid);
+                    skippedCount++;
+                }
+            }
+            else
+            {
+                Logger.LogTrace("SyncCertificates: UUID={Uuid} status {Status} not eligible for sync, skipping.", currentResponseItem.Uuid, certStatus);
+                skippedCount++;
             }
             else
             {

@@ -434,6 +434,22 @@ public class RequestManager
         return "-1";
     }
 
+    /// <summary>
+    ///     Maps a CSC API certificateType value back to a Keyfactor product ID.
+    ///     Handles numeric codes, descriptive strings, and passthrough of already-correct values.
+    /// </summary>
+    public string MapCertificateTypeToProductId(string cscCertificateType)
+    {
+        Logger.LogTrace("MapCertificateTypeToProductId: input='{CscCertType}'", cscCertificateType ?? "(null)");
+        if (!string.IsNullOrEmpty(cscCertificateType) && CodeToProductIdMap.TryGetValue(cscCertificateType, out var productId))
+        {
+            Logger.LogTrace("MapCertificateTypeToProductId: mapped '{CscCertType}' -> '{ProductId}'", cscCertificateType, productId);
+            return productId;
+        }
+        Logger.LogWarning("MapCertificateTypeToProductId: no mapping for '{CscCertType}', passing through as-is.", cscCertificateType);
+        return cscCertificateType ?? "CscGlobal";
+    }
+
     public Notifications GetNotifications(EnrollmentProductInfo productInfo)
     {
         Logger.LogTrace("GetNotifications: building notifications.");
