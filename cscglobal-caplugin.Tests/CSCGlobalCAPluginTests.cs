@@ -420,7 +420,7 @@ public class CSCGlobalCAPluginTests
         {
             Results = new List<CertificateResponse>
             {
-                new CertificateResponse { Uuid = "u1", Status = "ACTIVE", Certificate = apiBase64, CertificateType = "4" }
+                new CertificateResponse { Uuid = "u1", Status = "ACTIVE", Certificate = apiBase64, CertificateType = "CSC TrustedSecure DV" }
             }
         });
 
@@ -432,7 +432,10 @@ public class CSCGlobalCAPluginTests
         var items = buffer.ToArray();
         Assert.Single(items);
         Assert.Equal("u1", items[0].CARequestID);
-        Assert.Equal("CSC TrustedSecure Domain Validated SSL", items[0].ProductID);
+        // CSC's list/sync API returns the certificate's current product name directly, so the
+        // synced ProductID must match it verbatim (and therefore match the canonical Certificate
+        // Profile name configured in Command) rather than going through a name-remapping table.
+        Assert.Equal("CSC TrustedSecure DV", items[0].ProductID);
     }
 
     [Fact]
@@ -834,6 +837,58 @@ public class CSCGlobalCAPluginTests
 
         Assert.Equal((int)EndEntityStatus.EXTERNALVALIDATION, result.Status);
         Assert.Equal("uuid-new", result.CARequestID);
+        // Command's enrollment UI doesn't surface StatusMessage on a successful/pending result -
+        // only EnrollmentContext is - so the flow summary must be attached there instead, one
+        // bullet per step so it renders readably rather than as a single run-on blob.
+        Assert.NotNull(result.EnrollmentContext);
+        Assert.True(result.EnrollmentContext.ContainsKey("Flow: Enroll-New"));
+        Assert.True(result.EnrollmentContext.Keys.Count(k => k.StartsWith("Flow Step ")) > 1);
+    }
+
+    [Fact]
+    public async Task Enroll_New_SuccessWithDcvDetails_KeepsDcvEntriesAlongsideFlowSummary()
+    {
+        var mockClient = new Mock<ICscGlobalClient>();
+        mockClient.Setup(c => c.SubmitGetCustomFields()).ReturnsAsync(new List<GetCustomField>());
+        mockClient.Setup(c => c.SubmitRegistrationAsync(It.IsAny<RegistrationRequest>())).ReturnsAsync(new RegistrationResponse
+        {
+            Result = new Result
+            {
+                CommonName = "dcv.example.com",
+                Status = new Status { Uuid = "uuid-dcv" },
+                DcvDetails = new List<DcvDetail>
+                {
+                    new DcvDetail { CName = new CName { Name = "_dnsauth.example.com", Value = "token" } }
+                }
+            }
+        });
+
+        var plugin = MakePlugin(mockClient);
+        var result = await plugin.Enroll("csr", "CN=test", new Dictionary<string, string[]>(), ProductInfo(),
+            RequestFormat.PKCS10, EnrollmentType.New);
+
+        Assert.Equal("token", result.EnrollmentContext["_dnsauth.example.com"]);
+        Assert.True(result.EnrollmentContext.ContainsKey("Flow: Enroll-New"));
+        Assert.True(result.EnrollmentContext.Keys.Count(k => k.StartsWith("Flow Step ")) > 1);
+    }
+
+    [Fact]
+    public async Task Enroll_New_RegistrationErrorFromCsc_PrependsFlowSummaryToStatusMessage()
+    {
+        var mockClient = new Mock<ICscGlobalClient>();
+        mockClient.Setup(c => c.SubmitGetCustomFields()).ReturnsAsync(new List<GetCustomField>());
+        mockClient.Setup(c => c.SubmitRegistrationAsync(It.IsAny<RegistrationRequest>())).ReturnsAsync(new RegistrationResponse
+        {
+            RegistrationError = new RegistrationError { Description = "Open order in progress" }
+        });
+
+        var plugin = MakePlugin(mockClient);
+        var result = await plugin.Enroll("csr", "CN=test", new Dictionary<string, string[]>(), ProductInfo(),
+            RequestFormat.PKCS10, EnrollmentType.New);
+
+        Assert.Equal((int)EndEntityStatus.FAILED, result.Status);
+        Assert.Contains("Enroll-New", result.StatusMessage);
+        Assert.Contains("Open order in progress", result.StatusMessage);
     }
 
     [Fact]
@@ -993,10 +1048,14 @@ public class CSCGlobalCAPluginTests
             [EnrollmentConfigConstants.DomainControlValidationMethod] = "EMAIL"
         });
 
-        await plugin.Enroll("csr", "CN=test", new Dictionary<string, string[]>(), productInfo,
+        var result = await plugin.Enroll("csr", "CN=test", new Dictionary<string, string[]>(), productInfo,
             RequestFormat.PKCS10, EnrollmentType.New);
 
         mockFactory.Verify(f => f.ResolveDomainValidator(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+        // The DcvAutoPublish step must explain *why* it was a no-op for a non-CNAME method,
+        // rather than showing a bare [OK] under a CNAME-sounding step name.
+        var publishStep = result.EnrollmentContext.Single(e => e.Key.Contains("DcvAutoPublish"));
+        Assert.Contains("not CNAME", publishStep.Value);
     }
 
     [Fact]

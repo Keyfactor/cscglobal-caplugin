@@ -118,6 +118,51 @@ public class FlowLoggerTests
     }
 
     [Fact]
+    public void GetSummaryEntries_OneEntryPerStepPlusHeader()
+    {
+        using var flow = new FlowLogger(NewLoggerMock().Object, "MyFlow");
+        flow.Step("StepOne");
+        flow.Fail("StepTwo", "boom");
+
+        var entries = flow.GetSummaryEntries();
+
+        Assert.True(entries.ContainsKey("Flow: MyFlow"));
+        Assert.Contains("FAILED", entries["Flow: MyFlow"]);
+        Assert.Equal(3, entries.Count); // header + 2 steps
+        Assert.Contains(entries, e => e.Key.Contains("StepOne") && e.Value.Contains("OK"));
+        Assert.Contains(entries, e => e.Key.Contains("StepTwo") && e.Value.Contains("boom"));
+    }
+
+    [Fact]
+    public void GetSummaryEntries_AllStepsSucceed_HeaderReportsOk()
+    {
+        using var flow = new FlowLogger(NewLoggerMock().Object, "MyFlow");
+        flow.Step("StepOne");
+        flow.Step("StepTwo");
+
+        var entries = flow.GetSummaryEntries();
+
+        Assert.Contains("[OK]", entries["Flow: MyFlow"]);
+    }
+
+    [Fact]
+    public void GetSummaryEntries_BranchChildren_IncludedAsSeparateEntries()
+    {
+        using var flow = new FlowLogger(NewLoggerMock().Object, "MyFlow");
+        flow.Branch("Inner");
+        flow.Step("NestedStep");
+        flow.Fail("NestedFail", "inner reason");
+        flow.EndBranch();
+        flow.Step("TopLevelStep");
+
+        var entries = flow.GetSummaryEntries();
+
+        Assert.Contains(entries, e => e.Key.Contains("NestedStep"));
+        Assert.Contains(entries, e => e.Key.Contains("NestedFail") && e.Value.Contains("inner reason"));
+        Assert.Contains(entries, e => e.Key.Contains("TopLevelStep"));
+    }
+
+    [Fact]
     public void Dispose_NoSteps_DoesNotThrow()
     {
         var flow = new FlowLogger(NewLoggerMock().Object, "Flow");
