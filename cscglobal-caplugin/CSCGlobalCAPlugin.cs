@@ -63,7 +63,9 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
         _validatorFactory = validatorFactory;
     }
 
-    private ICscGlobalClient CscGlobalClient { get; set; }
+    // internal (not private) purely so the test project can inject a mock via
+    // InternalsVisibleTo, instead of hitting the real CSC Global API in unit tests.
+    internal ICscGlobalClient CscGlobalClient { get; set; }
 
     /// <summary>
     ///     Whether the CA is enabled. When false, the plugin returns early from Ping,
@@ -488,6 +490,26 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
                     Logger.LogTrace("SyncCertificates: fileContent was empty for UUID={Uuid}, skipping.", currentResponseItem.Uuid);
                     skippedCount++;
                 }
+                else
+                {
+                    Logger.LogTrace("SyncCertificates: fileContent was empty for UUID={Uuid}, skipping.", currentResponseItem.Uuid);
+                    skippedCount++;
+                }
+                else
+                {
+                    Logger.LogTrace("SyncCertificates: fileContent was empty for UUID={Uuid}, skipping.", currentResponseItem.Uuid);
+                    skippedCount++;
+                }
+            }
+            else
+            {
+                Logger.LogTrace("SyncCertificates: UUID={Uuid} status {Status} not eligible for sync, skipping.", currentResponseItem.Uuid, certStatus);
+                skippedCount++;
+            }
+            else
+            {
+                Logger.LogTrace("SyncCertificates: UUID={Uuid} status {Status} not eligible for sync, skipping.", currentResponseItem.Uuid, certStatus);
+                skippedCount++;
             }
             else
             {
@@ -950,7 +972,7 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
                     {
                         Status = 30,
                         StatusMessage =
-                            "One click Renew Is Not Available for this Certificate Type.  Use the configure button instead."
+                            $"{flow.GetSummary()}\n\nOne click Reissue Is Not Available for this Certificate Type.  Use the configure button instead."
                     };
 
                 default:

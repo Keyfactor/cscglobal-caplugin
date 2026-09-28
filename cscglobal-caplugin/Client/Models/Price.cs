@@ -13,5 +13,5 @@ namespace Keyfactor.Extensions.CAPlugin.CSCGlobal.Client.Models;
 public class Price : IPrice
 {
     [JsonProperty("currency")] public string Currency { get; set; }
-    [JsonProperty("total")] public decimal Total { get; set; }
+    [JsonProperty("total")] public decimal? Total { get; set; }
 }

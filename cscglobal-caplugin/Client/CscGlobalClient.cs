@@ -21,7 +21,7 @@ public sealed class CscGlobalClient : ICscGlobalClient
 {
     private readonly ILogger Logger;
 
-    public CscGlobalClient(IAnyCAPluginConfigProvider config)
+    public CscGlobalClient(IAnyCAPluginConfigProvider config) : this(config, null)
     {
         Logger = LogHandler.GetClassLogger<CscGlobalClient>();
 
@@ -352,10 +352,9 @@ public sealed class CscGlobalClient : ICscGlobalClient
         return certificateListResponse;
     }
 
-    private HttpClient ConfigureRestClient()
+    private HttpClient ConfigureRestClient(HttpMessageHandler? handler = null)
     {
-        var clientHandler = new HttpClientHandler();
-        var returnClient = new HttpClient(clientHandler, true)
+        var returnClient = new HttpClient(handler ?? new HttpClientHandler(), true)
         {
             BaseAddress = BaseUrl
         };

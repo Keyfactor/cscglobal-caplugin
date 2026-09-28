@@ -220,7 +220,7 @@ CSR Enrollment | True
 Pfx Enrollment | True
 
 
-**CSC TrustedSecure Domain Validated SSL - Enrollment Fields**
+                                                              **CSC TrustedSecure Domain Validated SSL - Enrollment Fields**
 
 NAME | DATA TYPE	| VALUES
 -----|--------------|-----------------
