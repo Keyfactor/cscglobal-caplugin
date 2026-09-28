@@ -23,12 +23,6 @@ public sealed class CscGlobalClient : ICscGlobalClient
 
     public CscGlobalClient(IAnyCAPluginConfigProvider config) : this(config, null)
     {
-    }
-
-    // internal so the test project can supply a fake HttpMessageHandler via
-    // InternalsVisibleTo, instead of the client making real HTTP calls in unit tests.
-    internal CscGlobalClient(IAnyCAPluginConfigProvider config, HttpMessageHandler? handler)
-    {
         Logger = LogHandler.GetClassLogger<CscGlobalClient>();
 
         if (config == null)
@@ -74,7 +68,7 @@ public sealed class CscGlobalClient : ICscGlobalClient
             }
             Logger.LogTrace("CscGlobalClient: BearerToken is present (length={Length}).", Authorization.Length);
 
-            RestClient = ConfigureRestClient(handler);
+            RestClient = ConfigureRestClient();
             Logger.LogTrace("CscGlobalClient: RestClient configured successfully.");
         }
         else

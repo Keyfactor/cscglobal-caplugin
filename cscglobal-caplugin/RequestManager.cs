@@ -388,39 +388,55 @@ public class RequestManager
         };
     }
 
-    // Maps Keyfactor product ID -> CSC API certificate type code (used for enrollment requests).
-    // Each product has an entry for its current (1.2.0+) canonical name and its pre-1.2.0 legacy
-    // name, so existing Certificate Templates in Command using the old names keep working.
-    // Types 7/8/9 are new in 1.2.0 and have no legacy name.
+    // Maps Keyfactor product ID -> CSC API certificate type code (used for enrollment requests)
     private static readonly Dictionary<string, string> ProductIdToCodeMap = new(StringComparer.OrdinalIgnoreCase)
     {
-        ["CSC TrustedSecure OV"] = "0",
         ["CSC TrustedSecure Premium Certificate"] = "0",
-        ["CSC TrustedSecure OV Wildcard"] = "1",
         ["CSC TrustedSecure Premium Wildcard Certificate"] = "1",
-        ["CSC TrustedSecure OV, Multiple Names"] = "2",
         ["CSC TrustedSecure UC Certificate"] = "2",
-        ["CSC TrustedSecure EV"] = "3",
         ["CSC TrustedSecure EV Certificate"] = "3",
-        ["CSC TrustedSecure DV"] = "4",
         ["CSC TrustedSecure Domain Validated SSL"] = "4",
         ["CSC Trusted Secure Domain Validated SSL"] = "4",
-        ["CSC TrustedSecure DV Wildcard"] = "5",
         ["CSC Trusted Secure Domain Validated Wildcard SSL"] = "5",
-        ["CSC TrustedSecure DV, Multiple Names"] = "6",
         ["CSC Trusted Secure Domain Validated UC Certificate"] = "6",
-        ["CSC TrustedSecure EV, Multiple Names"] = "7",
-        ["CSC TrustedSecure OV Wildcard, Multiple Names"] = "8",
-        ["CSC TrustedSecure DV Wildcard, Multiple Names"] = "9",
     };
 
-    /// <summary>
-    ///     True if productId resolves to a known CSC certificate type - either its canonical
-    ///     (1.2.0+) name or a pre-1.2.0 legacy name. Used by ValidateProductInfo so the list of
-    ///     accepted names can't drift out of sync with what GetCertificateType actually resolves.
-    /// </summary>
-    public bool IsKnownProductId(string productId) =>
-        !string.IsNullOrEmpty(productId) && ProductIdToCodeMap.ContainsKey(productId);
+    // Reverse map: CSC API certificateType string -> Keyfactor product ID (used during sync)
+    // Note: CSC naming is inconsistent — first 4 types use "TrustedSecure" (no space),
+    //       DV Wildcard and DV UC use "Trusted Secure" (with space),
+    //       but CSC API returns DV SSL as "CSC Trusted Secure Domain Validated SSL" (with space)
+    //       while the product ID is "CSC TrustedSecure Domain Validated SSL" (no space).
+    private static readonly Dictionary<string, string> CodeToProductIdMap = new(StringComparer.OrdinalIgnoreCase)
+    {
+        // Premium
+        ["0"] = "CSC TrustedSecure Premium Certificate",
+        ["CSC TrustedSecure Premium Certificate"] = "CSC TrustedSecure Premium Certificate",
+        ["CSC Trusted Secure Premium Certificate"] = "CSC TrustedSecure Premium Certificate",
+        // Premium Wildcard
+        ["1"] = "CSC TrustedSecure Premium Wildcard Certificate",
+        ["CSC TrustedSecure Premium Wildcard Certificate"] = "CSC TrustedSecure Premium Wildcard Certificate",
+        ["CSC Trusted Secure Premium Wildcard Certificate"] = "CSC TrustedSecure Premium Wildcard Certificate",
+        // UC
+        ["2"] = "CSC TrustedSecure UC Certificate",
+        ["CSC TrustedSecure UC Certificate"] = "CSC TrustedSecure UC Certificate",
+        ["CSC Trusted Secure UC Certificate"] = "CSC TrustedSecure UC Certificate",
+        // EV
+        ["3"] = "CSC TrustedSecure EV Certificate",
+        ["CSC TrustedSecure EV Certificate"] = "CSC TrustedSecure EV Certificate",
+        ["CSC Trusted Secure EV Certificate"] = "CSC TrustedSecure EV Certificate",
+        // DV SSL — product ID has no space, but CSC API returns with space
+        ["4"] = "CSC TrustedSecure Domain Validated SSL",
+        ["CSC TrustedSecure Domain Validated SSL"] = "CSC TrustedSecure Domain Validated SSL",
+        ["CSC Trusted Secure Domain Validated SSL"] = "CSC TrustedSecure Domain Validated SSL",
+        // DV Wildcard — product ID has space (matches CSC API)
+        ["5"] = "CSC Trusted Secure Domain Validated Wildcard SSL",
+        ["CSC Trusted Secure Domain Validated Wildcard SSL"] = "CSC Trusted Secure Domain Validated Wildcard SSL",
+        ["CSC TrustedSecure Domain Validated Wildcard SSL"] = "CSC Trusted Secure Domain Validated Wildcard SSL",
+        // DV UC — product ID has space (matches CSC API)
+        ["6"] = "CSC Trusted Secure Domain Validated UC Certificate",
+        ["CSC Trusted Secure Domain Validated UC Certificate"] = "CSC Trusted Secure Domain Validated UC Certificate",
+        ["CSC TrustedSecure Domain Validated UC Certificate"] = "CSC Trusted Secure Domain Validated UC Certificate",
+    };
 
     private string GetCertificateType(string productId)
     {
@@ -545,14 +561,6 @@ public class RequestManager
             ? productInfo.ProductParameters["Domain Control Validation Method"]
             : null;
 
-        // CSC Global rejects the request if any subjectAlternativeNames entry is missing
-        // domainControlValidation, so every SAN below must resolve to a non-null value - falling
-        // back to the primary CN's DCV email when no per-domain override matches.
-        var commonNameValidationEmail = productInfo?.ProductParameters != null
-            && productInfo.ProductParameters.ContainsKey(EnrollmentConfigConstants.CnDcvEmail)
-            ? productInfo.ProductParameters[EnrollmentConfigConstants.CnDcvEmail]
-            : null;
-
         Logger.LogTrace("GetSubjectAlternativeNames: processing {Count} DNS names, methodType='{MethodType}'",
             dnsNames.Length, methodType ?? "(null)");
 
@@ -571,19 +579,18 @@ public class RequestManager
 
             if (!string.IsNullOrEmpty(methodType) && methodType.ToUpper() == "EMAIL")
             {
-                var emailsRaw = productInfo.ProductParameters.ContainsKey(EnrollmentConfigConstants.AdditionalSansCommaSeparatedDcvEmails)
-                    ? productInfo.ProductParameters[EnrollmentConfigConstants.AdditionalSansCommaSeparatedDcvEmails]
+                var emailsRaw = productInfo.ProductParameters.ContainsKey("Addtl Sans Comma Separated DVC Emails")
+                    ? productInfo.ProductParameters["Addtl Sans Comma Separated DVC Emails"]
                     : null;
                 var emailAddresses = !string.IsNullOrEmpty(emailsRaw) ? emailsRaw.Split(',') : Array.Empty<string>();
                 Logger.LogTrace("GetSubjectAlternativeNames: EMAIL validation, {Count} email addresses for domain='{Domain}'",
                     emailAddresses.Length, domainName);
-                san.DomainControlValidation = GetDomainControlValidation(methodType, emailAddresses, domainName)
-                    ?? GetDomainControlValidation(methodType, commonNameValidationEmail);
+                san.DomainControlValidation = GetDomainControlValidation(methodType, emailAddresses, domainName);
             }
             else
             {
                 Logger.LogTrace("GetSubjectAlternativeNames: CNAME/other validation for domain='{Domain}'", domainName);
-                san.DomainControlValidation = GetDomainControlValidation(methodType, commonNameValidationEmail);
+                san.DomainControlValidation = GetDomainControlValidation(methodType, "");
             }
 
             subjectNameList.Add(san);
