@@ -30,10 +30,6 @@
                     "description": "Default page size for use with the API. Default is 100"
                 },
                 {
-                    "name": "TemplateSync",
-                    "description": "Enable template sync."
-                },
-                {
                     "name": "SyncFilterDays",
                     "description": "Number of days from today to filter certificates by expiration date during incremental sync."
                 }
@@ -89,13 +85,16 @@
                 }
             ],
             "product_ids": [
-                "CSC TrustedSecure Premium Certificate",
-                "CSC TrustedSecure EV Certificate",
-                "CSC TrustedSecure UC Certificate",
-                "CSC TrustedSecure Premium Wildcard Certificate",
-                "CSC TrustedSecure Domain Validated SSL",
-                "CSC TrustedSecure Domain Validated Wildcard SSL",
-                "CSC TrustedSecure Domain Validated UC Certificate"
+                "CSC TrustedSecure OV",
+                "CSC TrustedSecure OV Wildcard",
+                "CSC TrustedSecure OV, Multiple Names",
+                "CSC TrustedSecure EV",
+                "CSC TrustedSecure DV",
+                "CSC TrustedSecure DV Wildcard",
+                "CSC TrustedSecure DV, Multiple Names",
+                "CSC TrustedSecure EV, Multiple Names",
+                "CSC TrustedSecure OV Wildcard, Multiple Names",
+                "CSC TrustedSecure DV Wildcard, Multiple Names"
             ]
         }
     }
