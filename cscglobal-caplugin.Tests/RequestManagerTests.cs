@@ -4,7 +4,7 @@
 using Keyfactor.AnyGateway.Extensions;
 using Keyfactor.Extensions.CAPlugin.CSCGlobal;
 using Keyfactor.Extensions.CAPlugin.CSCGlobal.Client.Models;
-using Newtonsoft.Json;
+using Keyfactor.PKI.Enums.EJBCA;
 using Xunit;
 
 namespace CscGlobalCAPluginTests;
@@ -23,7 +23,347 @@ public class RequestManagerTests
     private static RequestManager Manager => new RequestManager();
 
     // ---------------------------------------------------------------------
-    // Certificate type routing - canonical (1.2.0+) names, all 10 products.
+    // GetRenewResponse
+    // ---------------------------------------------------------------------
+
+    [Fact]
+    public void GetRenewResponse_NullResponse_ReturnsFailed()
+    {
+        var result = Manager.GetRenewResponse(null);
+        Assert.Equal((int)EndEntityStatus.FAILED, result.Status);
+        Assert.Contains("no response", result.StatusMessage);
+    }
+
+    [Fact]
+    public void GetRenewResponse_RegistrationError_ReturnsFailedWithDescription()
+    {
+        var response = new RenewalResponse
+        {
+            RegistrationError = new RegistrationError { Description = "boom" },
+            Result = new Result { Status = new Status { Uuid = "abc-123" } }
+        };
+
+        var result = Manager.GetRenewResponse(response);
+
+        Assert.Equal((int)EndEntityStatus.FAILED, result.Status);
+        Assert.Equal("boom", result.StatusMessage);
+        Assert.Equal("abc-123", result.CARequestID);
+    }
+
+    [Fact]
+    public void GetRenewResponse_NullResult_ReturnsFailed()
+    {
+        var response = new RenewalResponse { Result = null };
+        var result = Manager.GetRenewResponse(response);
+        Assert.Equal((int)EndEntityStatus.FAILED, result.Status);
+        Assert.Contains("no result", result.StatusMessage);
+    }
+
+    [Fact]
+    public void GetRenewResponse_Success_ReturnsExternalValidation()
+    {
+        // CSC Global never returns an issued certificate on the renewal response itself - it
+        // still needs DCV, so this must not claim GENERATED (Command would then try to parse
+        // a certificate off a result that doesn't have one).
+        var response = new RenewalResponse
+        {
+            Result = new Result { CommonName = "renewed.example.com", Status = new Status { Uuid = "uuid-renew" } }
+        };
+        var result = Manager.GetRenewResponse(response);
+        Assert.Equal((int)EndEntityStatus.EXTERNALVALIDATION, result.Status);
+        Assert.Equal("uuid-renew", result.CARequestID);
+        Assert.Contains("renewed.example.com", result.StatusMessage);
+    }
+
+    [Fact]
+    public void GetRenewResponse_Success_WithDcvDetails_PopulatesEnrollmentContext()
+    {
+        var response = new RenewalResponse
+        {
+            Result = new Result
+            {
+                CommonName = "renewed.example.com",
+                Status = new Status { Uuid = "uuid-renew" },
+                DcvDetails = new List<DcvDetail>
+                {
+                    new DcvDetail { CName = new CName { Name = "_dnsauth.example.com", Value = "token" } }
+                }
+            }
+        };
+        var result = Manager.GetRenewResponse(response);
+        Assert.NotNull(result.EnrollmentContext);
+        Assert.Equal("token", result.EnrollmentContext["_dnsauth.example.com"]);
+    }
+
+    // ---------------------------------------------------------------------
+    // GetEnrollmentResult
+    // ---------------------------------------------------------------------
+
+    [Fact]
+    public void GetEnrollmentResult_NullResponse_ReturnsFailed()
+    {
+        var result = Manager.GetEnrollmentResult(null);
+        Assert.Equal((int)EndEntityStatus.FAILED, result.Status);
+    }
+
+    [Fact]
+    public void GetEnrollmentResult_RegistrationError_ReturnsFailed()
+    {
+        var response = new RegistrationResponse { RegistrationError = new RegistrationError { Description = "bad request" } };
+        var result = Manager.GetEnrollmentResult(response);
+        Assert.Equal((int)EndEntityStatus.FAILED, result.Status);
+        Assert.Equal("bad request", result.StatusMessage);
+    }
+
+    [Fact]
+    public void GetEnrollmentResult_NullResult_ReturnsFailed()
+    {
+        var response = new RegistrationResponse { Result = null };
+        var result = Manager.GetEnrollmentResult(response);
+        Assert.Equal((int)EndEntityStatus.FAILED, result.Status);
+    }
+
+    [Fact]
+    public void GetEnrollmentResult_SuccessNoDcvDetails_ReturnsExternalValidationWithNullContext()
+    {
+        var response = new RegistrationResponse
+        {
+            Result = new Result { CommonName = "order-1", Status = new Status { Uuid = "uuid-1" } }
+        };
+
+        var result = Manager.GetEnrollmentResult(response);
+
+        Assert.Equal((int)EndEntityStatus.EXTERNALVALIDATION, result.Status);
+        Assert.Equal("uuid-1", result.CARequestID);
+        Assert.Null(result.EnrollmentContext);
+    }
+
+    [Fact]
+    public void GetEnrollmentResult_WithCNameAndEmailDcvDetails_PopulatesEnrollmentContext()
+    {
+        var response = new RegistrationResponse
+        {
+            Result = new Result
+            {
+                CommonName = "order-2",
+                Status = new Status { Uuid = "uuid-2" },
+                DcvDetails = new List<DcvDetail>
+                {
+                    new DcvDetail { CName = new CName { Name = "_dnsauth.example.com", Value = "token" } },
+                    new DcvDetail { Email = "admin@example.com" },
+                    // Duplicate email key should not throw and should not be added twice.
+                    new DcvDetail { Email = "admin@example.com" },
+                    // Entry with neither CName nor Email contributes nothing.
+                    new DcvDetail()
+                }
+            }
+        };
+
+        var result = Manager.GetEnrollmentResult(response);
+
+        Assert.NotNull(result.EnrollmentContext);
+        Assert.Equal("token", result.EnrollmentContext["_dnsauth.example.com"]);
+        Assert.Equal("admin@example.com", result.EnrollmentContext["admin@example.com"]);
+        Assert.Equal(2, result.EnrollmentContext.Count);
+    }
+
+    [Fact]
+    public void GetEnrollmentResult_CnameMultiSanSharingBaseDomain_SingleDcvDetailCoversAllNames()
+    {
+        // Real CSC Global behavior: a wildcard CN plus two SAN entries all under the same
+        // registrable base domain ("boingy.com") only produces one dcvDetails entry for that
+        // base domain - CSC does not return one entry per requested SAN name.
+        var response = new RegistrationResponse
+        {
+            Result = new Result
+            {
+                CommonName = "*.boingy.com",
+                Status = new Status { Uuid = "b7094337-3fbb-4a3d-9a5c-3c2ea3394e92" },
+                DcvDetails = new List<DcvDetail>
+                {
+                    new DcvDetail
+                    {
+                        DomainName = "boingy.com",
+                        ActionNeeded = "Y",
+                        Email = null,
+                        CName = new CName
+                        {
+                            Name = "_489058F15A9A86BCDE6FAE1835C64424.boingy.com.",
+                            Value = "87754be597cffd626f3fd036ba2d21c0.1f782fab3e3a78e17fb68b2efcf391f6.0189912763034de0b9bc.sectigo.com."
+                        }
+                    }
+                }
+            }
+        };
+
+        var result = Manager.GetEnrollmentResult(response);
+
+        Assert.NotNull(result.EnrollmentContext);
+        Assert.Single(result.EnrollmentContext);
+        Assert.Equal(
+            "87754be597cffd626f3fd036ba2d21c0.1f782fab3e3a78e17fb68b2efcf391f6.0189912763034de0b9bc.sectigo.com.",
+            result.EnrollmentContext["_489058F15A9A86BCDE6FAE1835C64424.boingy.com."]);
+    }
+
+    // ---------------------------------------------------------------------
+    // GetRevokeResult
+    // ---------------------------------------------------------------------
+
+    [Fact]
+    public void GetRevokeResult_NullResponse_ReturnsFailed()
+    {
+        Assert.Equal((int)EndEntityStatus.FAILED, Manager.GetRevokeResult(null));
+    }
+
+    [Fact]
+    public void GetRevokeResult_RegistrationError_ReturnsFailed()
+    {
+        var response = new RevokeResponse { RegistrationError = new RegistrationError { Description = "nope" } };
+        Assert.Equal((int)EndEntityStatus.FAILED, Manager.GetRevokeResult(response));
+    }
+
+    [Fact]
+    public void GetRevokeResult_Success_ReturnsRevoked()
+    {
+        var response = new RevokeResponse();
+        Assert.Equal((int)EndEntityStatus.REVOKED, Manager.GetRevokeResult(response));
+    }
+
+    // ---------------------------------------------------------------------
+    // GetReIssueResult
+    // ---------------------------------------------------------------------
+
+    [Fact]
+    public void GetReIssueResult_NullResponse_ReturnsFailed()
+    {
+        var result = Manager.GetReIssueResult(null);
+        Assert.Equal((int)EndEntityStatus.FAILED, result.Status);
+    }
+
+    [Fact]
+    public void GetReIssueResult_RegistrationError_ReturnsFailed()
+    {
+        var response = new ReissueResponse { RegistrationError = new RegistrationError { Description = "rejected" } };
+        var result = Manager.GetReIssueResult(response);
+        Assert.Equal((int)EndEntityStatus.FAILED, result.Status);
+        Assert.Equal("rejected", result.StatusMessage);
+    }
+
+    [Fact]
+    public void GetReIssueResult_NullResult_ReturnsFailed()
+    {
+        var response = new ReissueResponse { Result = null };
+        var result = Manager.GetReIssueResult(response);
+        Assert.Equal((int)EndEntityStatus.FAILED, result.Status);
+    }
+
+    [Fact]
+    public void GetReIssueResult_Success_ReturnsExternalValidation()
+    {
+        // Same as renewal - CSC Global still requires DCV before actually issuing the
+        // certificate, so a reissue submission must not claim GENERATED either.
+        var response = new ReissueResponse
+        {
+            Result = new Result { CommonName = "reissued.example.com", Status = new Status { Uuid = "uuid-3" } }
+        };
+        var result = Manager.GetReIssueResult(response);
+        Assert.Equal((int)EndEntityStatus.EXTERNALVALIDATION, result.Status);
+        Assert.Equal("uuid-3", result.CARequestID);
+    }
+
+    [Fact]
+    public void GetReIssueResult_Success_WithDcvDetails_PopulatesEnrollmentContext()
+    {
+        var response = new ReissueResponse
+        {
+            Result = new Result
+            {
+                CommonName = "reissued.example.com",
+                Status = new Status { Uuid = "uuid-3" },
+                DcvDetails = new List<DcvDetail> { new DcvDetail { Email = "admin@example.com" } }
+            }
+        };
+        var result = Manager.GetReIssueResult(response);
+        Assert.NotNull(result.EnrollmentContext);
+        Assert.Equal("admin@example.com", result.EnrollmentContext["admin@example.com"]);
+    }
+
+    // ---------------------------------------------------------------------
+    // GetDomainControlValidation (email-list overload)
+    // ---------------------------------------------------------------------
+
+    [Fact]
+    public void GetDomainControlValidation_EmptyDomainName_ReturnsNull()
+    {
+        var result = Manager.GetDomainControlValidation("EMAIL", new[] { "admin@example.com" }, "");
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public void GetDomainControlValidation_NullEmailArray_ReturnsNull()
+    {
+        var result = Manager.GetDomainControlValidation("EMAIL", null!, "example.com");
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public void GetDomainControlValidation_MalformedEmailSkipped_NoMatchReturnsNull()
+    {
+        var result = Manager.GetDomainControlValidation("EMAIL", new[] { "not-an-email", "  " }, "example.com");
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public void GetDomainControlValidation_MatchingHostFound_ReturnsValidation()
+    {
+        var result = Manager.GetDomainControlValidation("EMAIL", new[] { "not-an-email", "admin@example.com" }, "www.example.com");
+        Assert.NotNull(result);
+        Assert.Equal("EMAIL", result.MethodType);
+        Assert.Contains("admin@example.com", result.EmailAddress);
+    }
+
+    [Fact]
+    public void GetDomainControlValidation_NoMatchingHost_ReturnsNull()
+    {
+        var result = Manager.GetDomainControlValidation("EMAIL", new[] { "admin@other.com" }, "www.example.com");
+        Assert.Null(result);
+    }
+
+    // ---------------------------------------------------------------------
+    // GetDomainControlValidation (single-email overload)
+    // ---------------------------------------------------------------------
+
+    [Fact]
+    public void GetDomainControlValidation_SingleEmail_ReturnsValidationVerbatim()
+    {
+        var result = Manager.GetDomainControlValidation("CNAME", "admin@example.com");
+        Assert.Equal("CNAME", result.MethodType);
+        Assert.Equal("admin@example.com", result.EmailAddress);
+    }
+
+    // ---------------------------------------------------------------------
+    // MapReturnStatus
+    // ---------------------------------------------------------------------
+
+    public static IEnumerable<object?[]> MapReturnStatusCases()
+    {
+        yield return new object?[] { "ACTIVE", (int)EndEntityStatus.GENERATED };
+        yield return new object?[] { "Initial", (int)EndEntityStatus.INITIALIZED };
+        yield return new object?[] { "Pending", (int)EndEntityStatus.INPROCESS };
+        yield return new object?[] { "REVOKED", (int)EndEntityStatus.REVOKED };
+        yield return new object?[] { "SOMETHING_ELSE", (int)EndEntityStatus.FAILED };
+        yield return new object?[] { null, (int)EndEntityStatus.FAILED };
+    }
+
+    [Theory]
+    [MemberData(nameof(MapReturnStatusCases))]
+    public void MapReturnStatus_MapsExpectedStatus(string? cscStatus, int expected)
+    {
+        Assert.Equal(expected, Manager.MapReturnStatus(cscStatus!));
+    }
+
+    // ---------------------------------------------------------------------
+    // GetRegistrationRequest - certificate type routing
     // ---------------------------------------------------------------------
 
     [Theory]
@@ -37,8 +377,16 @@ public class RequestManagerTests
     [InlineData("CSC TrustedSecure EV, Multiple Names", "7", true, true)]
     [InlineData("CSC TrustedSecure OV Wildcard, Multiple Names", "8", true, false)]
     [InlineData("CSC TrustedSecure DV Wildcard, Multiple Names", "9", true, false)]
-    [InlineData("Some Unrecognized Product", "-1", false, false)]
-    public void GetRegistrationRequest_CanonicalProductNames_RoutesCertificateTypeAndOptionalSections(
+    [InlineData("Some Unknown Product", "-1", false, false)]
+    // Legacy (pre-1.2.0) product names, kept as aliases for backward compatibility.
+    [InlineData("CSC TrustedSecure Premium Certificate", "0", false, false)]
+    [InlineData("CSC TrustedSecure Premium Wildcard Certificate", "1", false, false)]
+    [InlineData("CSC TrustedSecure UC Certificate", "2", true, false)]
+    [InlineData("CSC TrustedSecure EV Certificate", "3", false, true)]
+    [InlineData("CSC TrustedSecure Domain Validated SSL", "4", false, false)]
+    [InlineData("CSC TrustedSecure Domain Validated Wildcard SSL", "5", false, false)]
+    [InlineData("CSC TrustedSecure Domain Validated UC Certificate", "6", true, false)]
+    public void GetRegistrationRequest_RoutesCertificateTypeAndOptionalSections(
         string productId, string expectedType, bool expectSans, bool expectEv)
     {
         var sans = new Dictionary<string, string[]> { ["dnsname"] = new[] { "www.example.com" } };
@@ -53,76 +401,65 @@ public class RequestManagerTests
         Assert.Equal(expectedType, request.CertificateType);
         Assert.Equal(expectSans, request.SubjectAlternativeNames != null);
         Assert.Equal(expectEv, request.EvCertificateDetails != null);
-    }
-
-    // ---------------------------------------------------------------------
-    // Certificate type routing - pre-1.2.0 legacy names must resolve identically to their
-    // canonical replacement, so existing Certificate Templates in Command keep working.
-    // ---------------------------------------------------------------------
-
-    [Theory]
-    [InlineData("CSC TrustedSecure Premium Certificate", "0", false, false)]
-    [InlineData("CSC TrustedSecure Premium Wildcard Certificate", "1", false, false)]
-    [InlineData("CSC TrustedSecure UC Certificate", "2", true, false)]
-    [InlineData("CSC TrustedSecure EV Certificate", "3", false, true)]
-    [InlineData("CSC TrustedSecure Domain Validated SSL", "4", false, false)]
-    [InlineData("CSC Trusted Secure Domain Validated Wildcard SSL", "5", false, false)]
-    [InlineData("CSC Trusted Secure Domain Validated UC Certificate", "6", true, false)]
-    public void GetRegistrationRequest_LegacyProductNames_ResolveToSameCertificateType(
-        string legacyProductId, string expectedType, bool expectSans, bool expectEv)
-    {
-        var sans = new Dictionary<string, string[]> { ["dnsname"] = new[] { "www.example.com" } };
-        var productInfo = ProductInfo(legacyProductId, new Dictionary<string, string>
-        {
-            ["Domain Control Validation Method"] = "CNAME",
-            ["Organization Country"] = "US"
-        });
-
-        var request = Manager.GetRegistrationRequest(productInfo, SampleCsr, sans, new List<GetCustomField>());
-
-        Assert.Equal(expectedType, request.CertificateType);
-        Assert.Equal(expectSans, request.SubjectAlternativeNames != null);
-        Assert.Equal(expectEv, request.EvCertificateDetails != null);
+        if (expectEv)
+            Assert.Equal("US", request.EvCertificateDetails.Country);
     }
 
     [Fact]
-    public void GetRegistrationRequest_LegacyAndCanonicalName_ProduceIdenticalCertificateType()
+    public void GetRegistrationRequest_EncodesCsrAsBase64()
     {
-        var legacy = ProductInfo("CSC TrustedSecure UC Certificate");
-        var canonical = ProductInfo("CSC TrustedSecure OV, Multiple Names");
+        var productInfo = ProductInfo("CSC TrustedSecure OV");
+        var request = Manager.GetRegistrationRequest(productInfo, "hello", new Dictionary<string, string[]>(), new List<GetCustomField>());
 
-        var legacyRequest = Manager.GetRegistrationRequest(legacy, SampleCsr, new Dictionary<string, string[]>(), new List<GetCustomField>());
-        var canonicalRequest = Manager.GetRegistrationRequest(canonical, SampleCsr, new Dictionary<string, string[]>(), new List<GetCustomField>());
+        var decoded = Convert.FromBase64String(request.Csr);
+        Assert.Equal("hello", System.Text.Encoding.UTF8.GetString(decoded));
+    }
 
-        Assert.Equal(canonicalRequest.CertificateType, legacyRequest.CertificateType);
+    [Fact]
+    public void GetRegistrationRequest_MandatoryCustomFieldMissing_Throws()
+    {
+        var productInfo = ProductInfo("CSC TrustedSecure OV");
+        var customFields = new List<GetCustomField> { new GetCustomField { Label = "Required Field", Mandatory = true } };
+
+        Assert.Throws<Exception>(() =>
+            Manager.GetRegistrationRequest(productInfo, SampleCsr, new Dictionary<string, string[]>(), customFields));
+    }
+
+    [Fact]
+    public void GetRegistrationRequest_NullCustomFields_ReturnsEmptyList()
+    {
+        var productInfo = ProductInfo("CSC TrustedSecure OV");
+
+        var request = Manager.GetRegistrationRequest(productInfo, SampleCsr, new Dictionary<string, string[]>(), null!);
+
+        Assert.Empty(request.CustomFields);
+    }
+
+    [Fact]
+    public void GetRegistrationRequest_OptionalCustomFieldMissing_Skipped()
+    {
+        var productInfo = ProductInfo("CSC TrustedSecure OV");
+        var customFields = new List<GetCustomField> { new GetCustomField { Label = "Optional Field", Mandatory = false } };
+
+        var request = Manager.GetRegistrationRequest(productInfo, SampleCsr, new Dictionary<string, string[]>(), customFields);
+
+        Assert.Empty(request.CustomFields);
+    }
+
+    [Fact]
+    public void GetRegistrationRequest_CustomFieldPresent_IsMapped()
+    {
+        var productInfo = ProductInfo("CSC TrustedSecure OV", new Dictionary<string, string> { ["Custom Field"] = "value" });
+        var customFields = new List<GetCustomField> { new GetCustomField { Label = "Custom Field", Mandatory = false } };
+
+        var request = Manager.GetRegistrationRequest(productInfo, SampleCsr, new Dictionary<string, string[]>(), customFields);
+
+        Assert.Single(request.CustomFields);
+        Assert.Equal("value", request.CustomFields[0].Value);
     }
 
     // ---------------------------------------------------------------------
-    // IsKnownProductId - backs ValidateProductInfo. Must recognize both canonical and legacy
-    // names from the same source of truth GetCertificateType uses, so the two can't drift.
-    // ---------------------------------------------------------------------
-
-    [Theory]
-    [InlineData("CSC TrustedSecure DV")]
-    [InlineData("CSC TrustedSecure DV Wildcard, Multiple Names")]
-    [InlineData("CSC TrustedSecure Domain Validated SSL")]
-    [InlineData("csc trustedsecure dv")]
-    public void IsKnownProductId_RecognizedName_ReturnsTrue(string productId)
-    {
-        Assert.True(Manager.IsKnownProductId(productId));
-    }
-
-    [Theory]
-    [InlineData(null)]
-    [InlineData("")]
-    [InlineData("Not A Real Product")]
-    public void IsKnownProductId_UnrecognizedOrEmpty_ReturnsFalse(string? productId)
-    {
-        Assert.False(Manager.IsKnownProductId(productId!));
-    }
-
-    // ---------------------------------------------------------------------
-    // GetSubjectAlternativeNames (exercised via GetRegistrationRequest) - DCV email resolution.
+    // GetSubjectAlternativeNames (exercised via GetRegistrationRequest)
     // ---------------------------------------------------------------------
 
     [Fact]
@@ -148,13 +485,12 @@ public class RequestManagerTests
     public void GetRegistrationRequest_MultiNameEmailMethodNoAddtlSanMatch_FallsBackToCommonNameDcvEmail()
     {
         // CSC Global rejects the request if a SAN entry has no domainControlValidation, so a SAN
-        // domain unrelated to any configured "Addtl Sans" email must fall back to the primary
-        // CN's DCV email rather than being left null.
-        var sans = new Dictionary<string, string[]> { ["dnsname"] = new[] { "www.unrelated-domain.io" } };
+        // domain with no matching "Addtl Sans" email must fall back to the primary CN's DCV email.
+        var sans = new Dictionary<string, string[]> { ["dnsname"] = new[] { "www.example.com" } };
         var productInfo = ProductInfo("CSC TrustedSecure OV, Multiple Names", new Dictionary<string, string>
         {
             ["Domain Control Validation Method"] = "EMAIL",
-            [EnrollmentConfigConstants.CnDcvEmail] = "cn@example.com"
+            ["CN DCV Email"] = "cn@example.com"
         });
 
         var request = Manager.GetRegistrationRequest(productInfo, SampleCsr, sans, new List<GetCustomField>());
@@ -177,244 +513,123 @@ public class RequestManagerTests
         var request = Manager.GetRegistrationRequest(productInfo, SampleCsr, sans, new List<GetCustomField>());
 
         Assert.Single(request.SubjectAlternativeNames);
-        Assert.NotNull(request.SubjectAlternativeNames[0].DomainControlValidation);
-        Assert.Equal("CNAME", request.SubjectAlternativeNames[0].DomainControlValidation.MethodType);
+        var san = request.SubjectAlternativeNames[0];
+        Assert.NotNull(san.DomainControlValidation);
+        Assert.Equal("CNAME", san.DomainControlValidation.MethodType);
+        Assert.Equal(string.Empty, san.DomainControlValidation.EmailAddress);
     }
 
     [Fact]
-    public void GetRegistrationRequest_WildcardMultiNameProduct_AcceptsUnrelatedDomainSans()
+    public void GetRegistrationRequest_MultiNameProductWithNoDnsNameKey_ReturnsEmptySanList()
     {
-        // Types 8/9 are wildcard + multi-name (the underlying Sectigo Multi-Domain Wildcard
-        // product) - additional SANs are not restricted to the CN's own base domain.
-        var sans = new Dictionary<string, string[]>
-        {
-            ["dnsname"] = new[] { "*.example2.com", "*.example3.com" }
-        };
-        var productInfo = ProductInfo("CSC TrustedSecure DV Wildcard, Multiple Names", new Dictionary<string, string>
+        var productInfo = ProductInfo("CSC TrustedSecure OV, Multiple Names", new Dictionary<string, string>
         {
             ["Domain Control Validation Method"] = "CNAME"
         });
 
-        var request = Manager.GetRegistrationRequest(productInfo, SampleCsr, sans, new List<GetCustomField>());
+        var request = Manager.GetRegistrationRequest(productInfo, SampleCsr, new Dictionary<string, string[]>(), new List<GetCustomField>());
 
-        Assert.Equal(2, request.SubjectAlternativeNames.Count);
-        Assert.Equal("*.example2.com", request.SubjectAlternativeNames[0].DomainName);
-        Assert.Equal("*.example3.com", request.SubjectAlternativeNames[1].DomainName);
+        Assert.NotNull(request.SubjectAlternativeNames);
+        Assert.Empty(request.SubjectAlternativeNames);
     }
 
-    // ---------------------------------------------------------------------
-    // Price.Total nullability - CSC Global returns "price.total": null for orders that cannot
-    // be processed. Total must be nullable or Newtonsoft throws mid-deserialization, before the
-    // caller ever sees the RegistrationError/order status CSC was actually trying to report.
-    // ---------------------------------------------------------------------
-
     [Fact]
-    public void RegistrationResponse_NullPriceTotal_DeserializesWithoutThrowing()
+    public void GetRegistrationRequest_MultiNameProductWithNullSans_ReturnsEmptySanList()
     {
-        const string json = "{\"result\":{\"commonName\":\"order-1\",\"price\":{\"currency\":\"\",\"total\":null}}}";
-
-        var response = JsonConvert.DeserializeObject<RegistrationResponse>(json);
-
-        Assert.NotNull(response?.Result?.Price);
-        Assert.Null(response!.Result!.Price!.Total);
-    }
-
-    // ---------------------------------------------------------------------
-    // GetRenewResponse / GetReIssueResult - CSC never returns an issued certificate on these
-    // responses (only order/DCV status), so success must report EXTERNALVALIDATION, not
-    // GENERATED, or the gateway host will try to parse a certificate that doesn't exist.
-    // ---------------------------------------------------------------------
-
-    [Fact]
-    public void GetRenewResponse_Success_ReturnsExternalValidation()
-    {
-        var response = new RenewalResponse
+        var productInfo = ProductInfo("CSC TrustedSecure OV, Multiple Names", new Dictionary<string, string>
         {
-            Result = new Result { CommonName = "renewed.example.com", Status = new Status { Uuid = "uuid-1" } }
-        };
+            ["Domain Control Validation Method"] = "CNAME"
+        });
 
-        var result = Manager.GetRenewResponse(response);
+        var request = Manager.GetRegistrationRequest(productInfo, SampleCsr, null!, new List<GetCustomField>());
 
-        Assert.Equal((int)Keyfactor.PKI.Enums.EJBCA.EndEntityStatus.EXTERNALVALIDATION, result.Status);
-        Assert.Equal("uuid-1", result.CARequestID);
-    }
-
-    [Fact]
-    public void GetReIssueResult_Success_ReturnsExternalValidation()
-    {
-        var response = new ReissueResponse
-        {
-            Result = new Result { CommonName = "reissued.example.com", Status = new Status { Uuid = "uuid-2" } }
-        };
-
-        var result = Manager.GetReIssueResult(response);
-
-        Assert.Equal((int)Keyfactor.PKI.Enums.EJBCA.EndEntityStatus.EXTERNALVALIDATION, result.Status);
-        Assert.Equal("uuid-2", result.CARequestID);
-    }
-
-    [Fact]
-    public void GetReIssueResult_NullResponse_ReturnsFailed()
-    {
-        var result = Manager.GetReIssueResult(null);
-        Assert.Equal((int)Keyfactor.PKI.Enums.EJBCA.EndEntityStatus.FAILED, result.Status);
-    }
-
-    [Fact]
-    public void GetReIssueResult_RegistrationError_ReturnsFailedWithDescription()
-    {
-        var response = new ReissueResponse { RegistrationError = new RegistrationError { Description = "rejected" } };
-        var result = Manager.GetReIssueResult(response);
-        Assert.Equal((int)Keyfactor.PKI.Enums.EJBCA.EndEntityStatus.FAILED, result.Status);
-        Assert.Equal("rejected", result.StatusMessage);
-    }
-
-    [Fact]
-    public void GetReIssueResult_NullResult_ReturnsFailed()
-    {
-        var response = new ReissueResponse { Result = null };
-        var result = Manager.GetReIssueResult(response);
-        Assert.Equal((int)Keyfactor.PKI.Enums.EJBCA.EndEntityStatus.FAILED, result.Status);
-    }
-
-    [Fact]
-    public void GetRenewResponse_NullResponse_ReturnsFailed()
-    {
-        var result = Manager.GetRenewResponse(null);
-        Assert.Equal((int)Keyfactor.PKI.Enums.EJBCA.EndEntityStatus.FAILED, result.Status);
-    }
-
-    [Fact]
-    public void GetRenewResponse_RegistrationError_ReturnsFailedWithDescription()
-    {
-        var response = new RenewalResponse
-        {
-            RegistrationError = new RegistrationError { Description = "boom" },
-            Result = new Result { Status = new Status { Uuid = "abc-123" } }
-        };
-        var result = Manager.GetRenewResponse(response);
-        Assert.Equal((int)Keyfactor.PKI.Enums.EJBCA.EndEntityStatus.FAILED, result.Status);
-        Assert.Equal("abc-123", result.CARequestID);
-        Assert.Equal("boom", result.StatusMessage);
-    }
-
-    [Fact]
-    public void GetRenewResponse_NullResult_StillReturnsExternalValidation()
-    {
-        // Unlike GetEnrollmentResult/GetReIssueResult, GetRenewResponse has no explicit
-        // Result==null guard - it just null-conditionals through to "(unknown)"/null.
-        var response = new RenewalResponse { Result = null };
-        var result = Manager.GetRenewResponse(response);
-        Assert.Equal((int)Keyfactor.PKI.Enums.EJBCA.EndEntityStatus.EXTERNALVALIDATION, result.Status);
-        Assert.Contains("(unknown)", result.StatusMessage);
-    }
-
-    [Fact]
-    public void GetEnrollmentResult_NullResponse_ReturnsFailed()
-    {
-        var result = Manager.GetEnrollmentResult(null);
-        Assert.Equal((int)Keyfactor.PKI.Enums.EJBCA.EndEntityStatus.FAILED, result.Status);
-    }
-
-    [Fact]
-    public void GetEnrollmentResult_RegistrationError_ReturnsFailed()
-    {
-        var response = new RegistrationResponse { RegistrationError = new RegistrationError { Description = "denied" } };
-        var result = Manager.GetEnrollmentResult(response);
-        Assert.Equal((int)Keyfactor.PKI.Enums.EJBCA.EndEntityStatus.FAILED, result.Status);
-        Assert.Equal("denied", result.StatusMessage);
-    }
-
-    [Fact]
-    public void GetEnrollmentResult_NullResult_ReturnsFailed()
-    {
-        var response = new RegistrationResponse { Result = null };
-        var result = Manager.GetEnrollmentResult(response);
-        Assert.Equal((int)Keyfactor.PKI.Enums.EJBCA.EndEntityStatus.FAILED, result.Status);
-    }
-
-    [Fact]
-    public void GetEnrollmentResult_SuccessNoDcvDetails_ReturnsExternalValidationWithNullContext()
-    {
-        var response = new RegistrationResponse
-        {
-            Result = new Result { CommonName = "order-1", Status = new Status { Uuid = "uuid-1" } }
-        };
-        var result = Manager.GetEnrollmentResult(response);
-        Assert.Equal((int)Keyfactor.PKI.Enums.EJBCA.EndEntityStatus.EXTERNALVALIDATION, result.Status);
-        Assert.Equal("uuid-1", result.CARequestID);
-        Assert.Null(result.EnrollmentContext);
-    }
-
-    [Fact]
-    public void GetEnrollmentResult_WithCNameAndEmailDcvDetails_PopulatesEnrollmentContext()
-    {
-        var response = new RegistrationResponse
-        {
-            Result = new Result
-            {
-                CommonName = "order-2",
-                Status = new Status { Uuid = "uuid-2" },
-                DcvDetails = new List<DcvDetail>
-                {
-                    new DcvDetail { CName = new CName { Name = "_dnsauth.example.com", Value = "token" } },
-                    new DcvDetail { Email = "admin@example.com" },
-                    // Duplicate keys should not throw and should not be added twice.
-                    new DcvDetail { CName = new CName { Name = "_dnsauth.example.com", Value = "token" } },
-                    new DcvDetail { Email = "admin@example.com" },
-                    // Entry with neither CName nor Email contributes nothing. Null entries are skipped.
-                    new DcvDetail(),
-                    null!
-                }
-            }
-        };
-
-        var result = Manager.GetEnrollmentResult(response);
-
-        Assert.NotNull(result.EnrollmentContext);
-        Assert.Equal(2, result.EnrollmentContext.Count);
-        Assert.Equal("token", result.EnrollmentContext["_dnsauth.example.com"]);
-        Assert.Equal("admin@example.com", result.EnrollmentContext["admin@example.com"]);
+        Assert.NotNull(request.SubjectAlternativeNames);
+        Assert.Empty(request.SubjectAlternativeNames);
     }
 
     // ---------------------------------------------------------------------
-    // GetRevokeResult
+    // Per-product-type domain scenarios (based on the underlying Sectigo Multi-Domain/UCC
+    // and Multi-Domain Wildcard products CSC resells - see sectigo.com/ssl-certificates-tls/
+    // multi-domain-san-ucc and sectigostore.com/ssl-types/multi-domain-wildcard). SANs on the
+    // Multiple Names products are not restricted to the CN's own base domain; unrelated domains,
+    // and wildcards for unrelated domains, are valid. Note the CN itself lives inside the CSR
+    // blob and isn't observable at this layer, so these only exercise SAN/EV/type routing.
     // ---------------------------------------------------------------------
 
-    [Fact]
-    public void GetRevokeResult_NullResponse_ReturnsFailed()
+    public static IEnumerable<object[]> ProductTypeDomainScenarios()
     {
-        Assert.Equal((int)Keyfactor.PKI.Enums.EJBCA.EndEntityStatus.FAILED, Manager.GetRevokeResult(null));
+        // productId, sanDomains, expectedCertificateType, expectSans, expectEv
+        yield return new object[] { "CSC TrustedSecure OV", Array.Empty<string>(), "0", false, false };
+        yield return new object[] { "CSC TrustedSecure OV Wildcard", Array.Empty<string>(), "1", false, false };
+        yield return new object[]
+        {
+            "CSC TrustedSecure OV, Multiple Names",
+            new[] { "www.example.com", "shop.example.net", "portal.othercompany.org" },
+            "2", true, false
+        };
+        yield return new object[] { "CSC TrustedSecure EV", Array.Empty<string>(), "3", false, true };
+        yield return new object[] { "CSC TrustedSecure DV", Array.Empty<string>(), "4", false, false };
+        yield return new object[] { "CSC TrustedSecure DV Wildcard", Array.Empty<string>(), "5", false, false };
+        yield return new object[]
+        {
+            "CSC TrustedSecure DV, Multiple Names",
+            new[] { "mail.example.com", "app.example.com", "www.unrelated-domain.io" },
+            "6", true, false
+        };
+        yield return new object[]
+        {
+            "CSC TrustedSecure EV, Multiple Names",
+            new[] { "www.example.com", "www.example-partner.com" },
+            "7", true, true
+        };
+        yield return new object[]
+        {
+            // Wildcard multi-name: additional wildcard SANs for entirely unrelated domains,
+            // per Sectigo's own "*.example1.com, *.example2.com, *.example3.com" example.
+            "CSC TrustedSecure OV Wildcard, Multiple Names",
+            new[] { "*.example2.com", "*.example3.com" },
+            "8", true, false
+        };
+        yield return new object[]
+        {
+            // Base domain + wildcard for the same domain as two separate SAN entries -
+            // Sectigo requires both explicitly since a wildcard SAN alone does not cover
+            // the bare base domain.
+            "CSC TrustedSecure DV Wildcard, Multiple Names",
+            new[] { "example.com", "*.example.com" },
+            "9", true, false
+        };
     }
-
-    [Fact]
-    public void GetRevokeResult_RegistrationError_ReturnsFailed()
-    {
-        var response = new RevokeResponse { RegistrationError = new RegistrationError { Description = "denied" } };
-        Assert.Equal((int)Keyfactor.PKI.Enums.EJBCA.EndEntityStatus.FAILED, Manager.GetRevokeResult(response));
-    }
-
-    [Fact]
-    public void GetRevokeResult_Success_ReturnsRevoked()
-    {
-        var response = new RevokeResponse { RevokeSuccess = new RevokeSuccessResponse { Status = "REVOKED" } };
-        Assert.Equal((int)Keyfactor.PKI.Enums.EJBCA.EndEntityStatus.REVOKED, Manager.GetRevokeResult(response));
-    }
-
-    // ---------------------------------------------------------------------
-    // MapReturnStatus
-    // ---------------------------------------------------------------------
 
     [Theory]
-    [InlineData("ACTIVE", Keyfactor.PKI.Enums.EJBCA.EndEntityStatus.GENERATED)]
-    [InlineData("Initial", Keyfactor.PKI.Enums.EJBCA.EndEntityStatus.INITIALIZED)]
-    [InlineData("Pending", Keyfactor.PKI.Enums.EJBCA.EndEntityStatus.INPROCESS)]
-    [InlineData("REVOKED", Keyfactor.PKI.Enums.EJBCA.EndEntityStatus.REVOKED)]
-    [InlineData("SomethingUnexpected", Keyfactor.PKI.Enums.EJBCA.EndEntityStatus.FAILED)]
-    [InlineData(null, Keyfactor.PKI.Enums.EJBCA.EndEntityStatus.FAILED)]
-    public void MapReturnStatus_MapsExpectedStatus(string? cscStatus, Keyfactor.PKI.Enums.EJBCA.EndEntityStatus expected)
+    [MemberData(nameof(ProductTypeDomainScenarios))]
+    public void GetRegistrationRequest_ProductTypeDomainScenarios_BuildsExpectedRequest(
+        string productId, string[] sanDomains, string expectedCertificateType, bool expectSans, bool expectEv)
     {
-        Assert.Equal((int)expected, Manager.MapReturnStatus(cscStatus!));
+        var sans = sanDomains.Length > 0
+            ? new Dictionary<string, string[]> { ["dnsname"] = sanDomains }
+            : new Dictionary<string, string[]>();
+        var productInfo = ProductInfo(productId, new Dictionary<string, string>
+        {
+            ["Domain Control Validation Method"] = "CNAME",
+            ["Organization Country"] = "US"
+        });
+
+        var request = Manager.GetRegistrationRequest(productInfo, SampleCsr, sans, new List<GetCustomField>());
+
+        Assert.Equal(expectedCertificateType, request.CertificateType);
+        Assert.Equal(expectEv, request.EvCertificateDetails != null);
+
+        if (!expectSans)
+        {
+            Assert.Null(request.SubjectAlternativeNames);
+            return;
+        }
+
+        Assert.NotNull(request.SubjectAlternativeNames);
+        Assert.Equal(sanDomains.Length, request.SubjectAlternativeNames.Count);
+        Assert.Equal(sanDomains, request.SubjectAlternativeNames.Select(s => s.DomainName));
+        Assert.All(request.SubjectAlternativeNames, s => Assert.NotNull(s.DomainControlValidation));
     }
 
     // ---------------------------------------------------------------------
@@ -424,7 +639,8 @@ public class RequestManagerTests
     [Fact]
     public void GetNotifications_NoEmailsConfigured_ReturnsEmptyList()
     {
-        var notifications = Manager.GetNotifications(ProductInfo("CSC TrustedSecure DV"));
+        var productInfo = ProductInfo("CSC TrustedSecure OV");
+        var notifications = Manager.GetNotifications(productInfo);
         Assert.True(notifications.Enabled);
         Assert.Empty(notifications.AdditionalNotificationEmails);
     }
@@ -432,7 +648,7 @@ public class RequestManagerTests
     [Fact]
     public void GetNotifications_EmailsConfigured_SplitsOnComma()
     {
-        var productInfo = ProductInfo("CSC TrustedSecure DV",
+        var productInfo = ProductInfo("CSC TrustedSecure OV",
             new Dictionary<string, string> { ["Notification Email(s) Comma Separated"] = "a@example.com,b@example.com" });
 
         var notifications = Manager.GetNotifications(productInfo);
@@ -442,119 +658,88 @@ public class RequestManagerTests
     }
 
     // ---------------------------------------------------------------------
-    // GetDomainControlValidation
+    // GetRenewalRequest / GetReissueRequest - basic parity with GetRegistrationRequest
     // ---------------------------------------------------------------------
 
     [Fact]
-    public void GetDomainControlValidation_EmptyEmailArray_ReturnsNull()
+    public void GetRenewalRequest_MultiNameProduct_PopulatesUuidAndSans()
     {
-        Assert.Null(Manager.GetDomainControlValidation("EMAIL", Array.Empty<string>(), "example.com"));
-    }
-
-    [Fact]
-    public void GetDomainControlValidation_NullEmailArray_ReturnsNull()
-    {
-        Assert.Null(Manager.GetDomainControlValidation("EMAIL", null!, "example.com"));
-    }
-
-    [Fact]
-    public void GetDomainControlValidation_MatchingHostFound_ReturnsValidation()
-    {
-        var result = Manager.GetDomainControlValidation("EMAIL", new[] { "not-an-email", "admin@example.com" }, "www.example.com");
-        Assert.NotNull(result);
-        Assert.Equal("EMAIL", result.MethodType);
-        Assert.Contains("admin@example.com", result.EmailAddress);
-    }
-
-    [Fact]
-    public void GetDomainControlValidation_NoMatchingHost_ReturnsNull()
-    {
-        Assert.Null(Manager.GetDomainControlValidation("EMAIL", new[] { "admin@other.com" }, "www.example.com"));
-    }
-
-    [Fact]
-    public void GetDomainControlValidation_SingleEmailOverload_ReturnsValidationVerbatim()
-    {
-        var result = Manager.GetDomainControlValidation("CNAME", "admin@example.com");
-        Assert.Equal("CNAME", result.MethodType);
-        Assert.Equal("admin@example.com", result.EmailAddress);
-    }
-
-    // ---------------------------------------------------------------------
-    // GetCustomFields (exercised via GetRegistrationRequest)
-    // ---------------------------------------------------------------------
-
-    [Fact]
-    public void GetRegistrationRequest_MandatoryCustomFieldMissing_Throws()
-    {
-        var productInfo = ProductInfo("CSC TrustedSecure DV");
-        var customFields = new List<GetCustomField> { new GetCustomField { Label = "Required Field", Mandatory = true } };
-
-        Assert.Throws<Exception>(() =>
-            Manager.GetRegistrationRequest(productInfo, SampleCsr, new Dictionary<string, string[]>(), customFields));
-    }
-
-    [Fact]
-    public void GetRegistrationRequest_OptionalCustomFieldMissing_DoesNotThrow()
-    {
-        var productInfo = ProductInfo("CSC TrustedSecure DV");
-        var customFields = new List<GetCustomField> { new GetCustomField { Label = "Optional Field", Mandatory = false } };
-
-        var request = Manager.GetRegistrationRequest(productInfo, SampleCsr, new Dictionary<string, string[]>(), customFields);
-        Assert.Empty(request.CustomFields);
-    }
-
-    [Fact]
-    public void GetRegistrationRequest_CustomFieldPresent_IsMapped()
-    {
-        var productInfo = ProductInfo("CSC TrustedSecure DV", new Dictionary<string, string> { ["Custom Field"] = "value" });
-        var customFields = new List<GetCustomField> { new GetCustomField { Label = "Custom Field", Mandatory = false } };
-
-        var request = Manager.GetRegistrationRequest(productInfo, SampleCsr, new Dictionary<string, string[]>(), customFields);
-
-        Assert.Single(request.CustomFields);
-        Assert.Equal("value", request.CustomFields[0].Value);
-    }
-
-    [Fact]
-    public void GetRegistrationRequest_NullCustomFieldsList_ReturnsEmptyCustomFields()
-    {
-        var request = Manager.GetRegistrationRequest(ProductInfo("CSC TrustedSecure DV"), SampleCsr,
-            new Dictionary<string, string[]>(), null!);
-        Assert.Empty(request.CustomFields);
-    }
-
-    [Fact]
-    public void GetRegistrationRequest_CustomFieldsWithNullEntryAndBlankLabel_SkipsBoth()
-    {
-        var productInfo = ProductInfo("CSC TrustedSecure DV", new Dictionary<string, string> { ["Custom Field"] = "value" });
-        var customFields = new List<GetCustomField>
+        var sans = new Dictionary<string, string[]> { ["dnsname"] = new[] { "www.example.com" } };
+        var productInfo = ProductInfo("CSC TrustedSecure DV, Multiple Names", new Dictionary<string, string>
         {
-            null!,
-            new GetCustomField { Label = "", Mandatory = false },
-            new GetCustomField { Label = "Custom Field", Mandatory = false }
-        };
+            ["Domain Control Validation Method"] = "CNAME"
+        });
 
-        var request = Manager.GetRegistrationRequest(productInfo, SampleCsr, new Dictionary<string, string[]>(), customFields);
+        var request = Manager.GetRenewalRequest(productInfo, "uuid-123", SampleCsr, sans, new List<GetCustomField>());
 
-        Assert.Single(request.CustomFields);
-        Assert.Equal("value", request.CustomFields[0].Value);
+        Assert.Equal("uuid-123", request.Uuid);
+        Assert.Equal("6", request.CertificateType);
+        Assert.Single(request.SubjectAlternativeNames);
+        Assert.Null(request.EvCertificateDetails);
     }
 
-    // ---------------------------------------------------------------------
-    // GetRenewalRequest / GetReissueRequest - parity with GetRegistrationRequest
-    // ---------------------------------------------------------------------
+    [Fact]
+    public void GetRenewalRequest_LegacyProductName_ResolvesCertificateTypeAndSans()
+    {
+        // A Certificate Template in Command created before the 1.2.0 rename still carries the
+        // old product name; renewals against it must resolve the same as the canonical name.
+        var sans = new Dictionary<string, string[]> { ["dnsname"] = new[] { "www.example.com" } };
+        var productInfo = ProductInfo("CSC TrustedSecure Domain Validated UC Certificate", new Dictionary<string, string>
+        {
+            ["Domain Control Validation Method"] = "CNAME"
+        });
+
+        var request = Manager.GetRenewalRequest(productInfo, "uuid-legacy", SampleCsr, sans, new List<GetCustomField>());
+
+        Assert.Equal("6", request.CertificateType);
+        Assert.Single(request.SubjectAlternativeNames);
+    }
 
     [Fact]
     public void GetRenewalRequest_EvProduct_PopulatesEvDetailsNoSans()
     {
-        var productInfo = ProductInfo("CSC TrustedSecure EV", new Dictionary<string, string> { ["Organization Country"] = "CA" });
+        var productInfo = ProductInfo("CSC TrustedSecure EV", new Dictionary<string, string>
+        {
+            ["Organization Country"] = "CA"
+        });
+
         var request = Manager.GetRenewalRequest(productInfo, "uuid-456", SampleCsr, new Dictionary<string, string[]>(), new List<GetCustomField>());
 
         Assert.Equal("3", request.CertificateType);
         Assert.Null(request.SubjectAlternativeNames);
         Assert.NotNull(request.EvCertificateDetails);
         Assert.Equal("CA", request.EvCertificateDetails.Country);
+    }
+
+    [Fact]
+    public void GetReissueRequest_MultiNameProduct_PopulatesUuidAndSans()
+    {
+        var sans = new Dictionary<string, string[]> { ["dnsname"] = new[] { "www.example.com" } };
+        var productInfo = ProductInfo("CSC TrustedSecure OV Wildcard, Multiple Names", new Dictionary<string, string>
+        {
+            ["Domain Control Validation Method"] = "CNAME"
+        });
+
+        var request = Manager.GetReissueRequest(productInfo, "uuid-789", SampleCsr, sans, new List<GetCustomField>());
+
+        Assert.Equal("uuid-789", request.Uuid);
+        Assert.Equal("8", request.CertificateType);
+        Assert.Single(request.SubjectAlternativeNames);
+    }
+
+    [Fact]
+    public void GetReissueRequest_LegacyProductName_ResolvesCertificateType()
+    {
+        var productInfo = ProductInfo("CSC TrustedSecure EV Certificate", new Dictionary<string, string>
+        {
+            ["Organization Country"] = "US"
+        });
+
+        var request = Manager.GetReissueRequest(productInfo, "uuid-legacy-2", SampleCsr,
+            new Dictionary<string, string[]>(), new List<GetCustomField>());
+
+        Assert.Equal("3", request.CertificateType);
+        Assert.NotNull(request.EvCertificateDetails);
     }
 
     [Fact]
@@ -573,147 +758,5 @@ public class RequestManagerTests
         Assert.Single(request.SubjectAlternativeNames);
         Assert.NotNull(request.EvCertificateDetails);
         Assert.Equal("GB", request.EvCertificateDetails.Country);
-    }
-
-    [Fact]
-    public void GetRegistrationRequest_AllOptionalParametersSupplied_MapsEachField()
-    {
-        var productInfo = ProductInfo("CSC TrustedSecure DV", new Dictionary<string, string>
-        {
-            ["Term"] = "12",
-            ["Applicant First Name"] = "Jane",
-            ["Applicant Last Name"] = "Doe",
-            ["Applicant Email Address"] = "jane.doe@example.com",
-            ["Applicant Phone"] = "555-1234",
-            ["Organization Contact"] = "contact-1",
-            ["Business Unit"] = "IT"
-        });
-
-        var request = Manager.GetRegistrationRequest(productInfo, SampleCsr, new Dictionary<string, string[]>(), new List<GetCustomField>());
-
-        Assert.Equal("12", request.Term);
-        Assert.Equal("Jane", request.ApplicantFirstName);
-        Assert.Equal("Doe", request.ApplicantLastName);
-        Assert.Equal("jane.doe@example.com", request.ApplicantEmailAddress);
-        Assert.Equal("555-1234", request.ApplicantPhoneNumber);
-        Assert.Equal("contact-1", request.OrganizationContact);
-        Assert.Equal("IT", request.BusinessUnit);
-    }
-
-    [Fact]
-    public void GetRenewalRequest_AllOptionalParametersSupplied_MapsEachField()
-    {
-        var productInfo = ProductInfo("CSC TrustedSecure DV", new Dictionary<string, string>
-        {
-            ["Term"] = "24",
-            ["Applicant First Name"] = "John",
-            ["Applicant Last Name"] = "Smith",
-            ["Applicant Email Address"] = "john.smith@example.com",
-            ["Applicant Phone"] = "555-5678",
-            ["Organization Contact"] = "contact-2",
-            ["Business Unit"] = "Legal"
-        });
-
-        var request = Manager.GetRenewalRequest(productInfo, "uuid-renewal", SampleCsr, new Dictionary<string, string[]>(), new List<GetCustomField>());
-
-        Assert.Equal("24", request.Term);
-        Assert.Equal("John", request.ApplicantFirstName);
-        Assert.Equal("Smith", request.ApplicantLastName);
-        Assert.Equal("john.smith@example.com", request.ApplicantEmailAddress);
-        Assert.Equal("555-5678", request.ApplicantPhoneNumber);
-        Assert.Equal("contact-2", request.OrganizationContact);
-        Assert.Equal("Legal", request.BusinessUnit);
-    }
-
-    [Fact]
-    public void GetReissueRequest_AllOptionalParametersSupplied_MapsEachField()
-    {
-        var productInfo = ProductInfo("CSC TrustedSecure DV", new Dictionary<string, string>
-        {
-            ["Term"] = "36",
-            ["Applicant First Name"] = "Alex",
-            ["Applicant Last Name"] = "Nguyen",
-            ["Applicant Email Address"] = "alex.nguyen@example.com",
-            ["Applicant Phone"] = "555-9012",
-            ["Organization Contact"] = "contact-3",
-            ["Business Unit"] = "Finance"
-        });
-
-        var request = Manager.GetReissueRequest(productInfo, "uuid-reissue", SampleCsr, new Dictionary<string, string[]>(), new List<GetCustomField>());
-
-        Assert.Equal("36", request.Term);
-        Assert.Equal("Alex", request.ApplicantFirstName);
-        Assert.Equal("Nguyen", request.ApplicantLastName);
-        Assert.Equal("alex.nguyen@example.com", request.ApplicantEmailAddress);
-        Assert.Equal("555-9012", request.ApplicantPhoneNumber);
-        Assert.Equal("contact-3", request.OrganizationContact);
-        Assert.Equal("Finance", request.BusinessUnit);
-    }
-
-    [Fact]
-    public void GetRegistrationRequest_NullProductParameters_Throws()
-    {
-        var productInfo = new EnrollmentProductInfo { ProductID = "CSC TrustedSecure DV", ProductParameters = null! };
-        Assert.Throws<ArgumentNullException>(() =>
-            Manager.GetRegistrationRequest(productInfo, SampleCsr, new Dictionary<string, string[]>(), new List<GetCustomField>()));
-    }
-
-    [Fact]
-    public void GetRegistrationRequest_NullProductInfo_Throws()
-    {
-        Assert.Throws<ArgumentNullException>(() =>
-            Manager.GetRegistrationRequest(null!, SampleCsr, new Dictionary<string, string[]>(), new List<GetCustomField>()));
-    }
-
-    [Fact]
-    public void GetRegistrationRequest_NullCsr_Throws()
-    {
-        Assert.Throws<ArgumentNullException>(() =>
-            Manager.GetRegistrationRequest(ProductInfo("CSC TrustedSecure DV"), null!, new Dictionary<string, string[]>(), new List<GetCustomField>()));
-    }
-
-    [Fact]
-    public void GetRegistrationRequest_CsrLongerThan64Chars_WrapsWithPemify()
-    {
-        var longCsr = new string('X', 130);
-        var request = Manager.GetRegistrationRequest(ProductInfo("CSC TrustedSecure DV"), longCsr, new Dictionary<string, string[]>(), new List<GetCustomField>());
-        var decoded = System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(request.Csr));
-        Assert.Contains("\n", decoded);
-    }
-
-    [Fact]
-    public void GetRenewalRequest_NullUuid_Throws()
-    {
-        Assert.Throws<ArgumentNullException>(() =>
-            Manager.GetRenewalRequest(ProductInfo("CSC TrustedSecure DV"), null!, SampleCsr, new Dictionary<string, string[]>(), new List<GetCustomField>()));
-    }
-
-    [Fact]
-    public void EvCertificateDetails_AllPropertiesSettable()
-    {
-        var details = new EvCertificateDetails
-        {
-            Country = "US",
-            City = "Independence",
-            State = "OH",
-            DateOfIncorporation = "2020-01-01",
-            DoingBusinessAs = "Keyfactor",
-            BusinessCategory = "Private Organization"
-        };
-
-        Assert.Equal("US", details.Country);
-        Assert.Equal("Independence", details.City);
-        Assert.Equal("OH", details.State);
-        Assert.Equal("2020-01-01", details.DateOfIncorporation);
-        Assert.Equal("Keyfactor", details.DoingBusinessAs);
-        Assert.Equal("Private Organization", details.BusinessCategory);
-    }
-
-    [Fact]
-    public void GetRegistrationRequest_EncodesCsrAsBase64()
-    {
-        var request = Manager.GetRegistrationRequest(ProductInfo("CSC TrustedSecure DV"), "hello", new Dictionary<string, string[]>(), new List<GetCustomField>());
-        var decoded = Convert.FromBase64String(request.Csr);
-        Assert.Contains("hello", System.Text.Encoding.UTF8.GetString(decoded));
     }
 }

@@ -19,45 +19,28 @@ namespace Keyfactor.Extensions.CAPlugin.CSCGlobal;
 public class RequestManager
 {
     private readonly ILogger Logger = LogHandler.GetClassLogger<RequestManager>();
+
     public static Func<string, string> Pemify = ss =>
         ss.Length <= 64 ? ss : ss.Substring(0, 64) + "\n" + Pemify(ss.Substring(64));
 
-    // Certificate types that carry a list of additional SAN domains, vs. a single CN only.
-    private static readonly HashSet<string> MultiNameCertificateTypes = new() { "2", "6", "7", "8", "9" };
-
-    // Certificate types that require EvCertificateDetails (Organization Country, etc.).
-    private static readonly HashSet<string> EvCertificateTypes = new() { "3", "7" };
+    private static string GetOptionalParam(EnrollmentProductInfo productInfo, string key)
+    {
+        return productInfo.ProductParameters != null &&
+               productInfo.ProductParameters.TryGetValue(key, out var value)
+            ? value
+            : string.Empty;
+    }
 
     private List<CustomField> GetCustomFields(EnrollmentProductInfo productInfo, List<GetCustomField> customFields)
     {
-        Logger.LogTrace("GetCustomFields: productInfo is {Null}, customFields count={Count}",
-            productInfo == null ? "NULL" : "present",
-            customFields?.Count ?? 0);
-
         var customFieldList = new List<CustomField>();
-        if (customFields == null || productInfo?.ProductParameters == null)
+        if (customFields == null)
         {
-            Logger.LogTrace("GetCustomFields: returning empty list (null customFields or ProductParameters).");
+            Logger.LogTrace("No custom field definitions supplied; skipping custom field mapping");
             return customFieldList;
         }
 
         foreach (var field in customFields)
-        {
-            if (field == null)
-            {
-                Logger.LogTrace("GetCustomFields: skipping null field entry.");
-                continue;
-            }
-
-            Logger.LogTrace("GetCustomFields: checking field Label='{Label}', Mandatory={Mandatory}",
-                field.Label ?? "(null)", field.Mandatory);
-
-            if (string.IsNullOrEmpty(field.Label))
-            {
-                Logger.LogTrace("GetCustomFields: skipping field with null/empty label.");
-                continue;
-            }
-
             if (productInfo.ProductParameters.ContainsKey(field.Label))
             {
                 var newField = new CustomField
@@ -65,61 +48,89 @@ public class RequestManager
                     Name = field.Label,
                     Value = productInfo.ProductParameters[field.Label]
                 };
-                Logger.LogTrace("GetCustomFields: matched field '{Label}' = '{Value}'", field.Label, newField.Value ?? "(null)");
                 customFieldList.Add(newField);
             }
             else if (field.Mandatory)
             {
-                Logger.LogError("GetCustomFields: mandatory field '{Label}' was not supplied. Available keys: [{Keys}]",
-                    field.Label, string.Join(", ", productInfo.ProductParameters.Keys));
+                Logger.LogError($"Custom field {field.Label} is marked as mandatory, but was not supplied in the request.");
                 throw new Exception(
                     $"Custom field {field.Label} is marked as mandatory, but was not supplied in the request.");
             }
-            else
-            {
-                Logger.LogTrace("GetCustomFields: optional field '{Label}' not found in ProductParameters, skipping.", field.Label);
-            }
-        }
 
-        Logger.LogTrace("GetCustomFields: returning {Count} custom fields.", customFieldList.Count);
+        Logger.LogTrace($"Mapped {customFieldList.Count} custom field(s) for request");
         return customFieldList;
     }
 
     public EnrollmentResult GetRenewResponse(RenewalResponse renewResponse)
     {
-        Logger.LogTrace("GetRenewResponse: renewResponse is {Null}", renewResponse == null ? "NULL" : "present");
-
         if (renewResponse == null)
         {
-            Logger.LogError("GetRenewResponse: renewResponse is null.");
+            Logger.LogError("Renewal failed: CSC Global returned no response");
             return new EnrollmentResult
             {
-                Status = (int)EndEntityStatus.FAILED,
-                StatusMessage = "Renewal failed: received null response from CSC."
+                Status = (int)EndEntityStatus.FAILED, //failure
+                StatusMessage = "CSC Global returned no response for the renewal request"
             };
         }
 
         if (renewResponse.RegistrationError != null)
         {
-            Logger.LogWarning("GetRenewResponse: RegistrationError present. Description='{Desc}'",
-                renewResponse.RegistrationError.Description ?? "(null)");
+            Logger.LogError($"Renewal failed: {renewResponse.RegistrationError.Description}");
             return new EnrollmentResult
             {
-                Status = (int)EndEntityStatus.FAILED,
+                Status = (int)EndEntityStatus.FAILED, //failure
                 CARequestID = renewResponse.Result?.Status?.Uuid,
-                StatusMessage = renewResponse.RegistrationError.Description ?? "Renewal failed with unknown error."
+                StatusMessage = renewResponse.RegistrationError.Description
             };
         }
 
-        var commonName = renewResponse.Result?.CommonName ?? "(unknown)";
-        var uuid = renewResponse.Result?.Status?.Uuid;
-        Logger.LogTrace("GetRenewResponse: renewal succeeded for CommonName='{CommonName}', UUID='{Uuid}'", commonName, uuid ?? "(null)");
+        if (renewResponse.Result == null)
+        {
+            Logger.LogError("Renewal failed: CSC Global reported success but returned no result");
+            return new EnrollmentResult
+            {
+                Status = (int)EndEntityStatus.FAILED, //failure
+                StatusMessage = "CSC Global reported success but returned no result"
+            };
+        }
+
+        // CSC Global never returns an issued certificate on the renewal response itself - the
+        // renewal is only submitted here and still needs domain control validation (email
+        // confirmation or a CNAME record) before CSC actually issues the certificate. The real
+        // certificate is picked up later via Synchronize. Reporting GENERATED here tells Command
+        // a certificate is ready to be parsed off this result when there isn't one.
+        Logger.LogInformation($"Renewal successfully submitted for {renewResponse.Result.CommonName}");
         return new EnrollmentResult
         {
-            Status = (int)EndEntityStatus.EXTERNALVALIDATION,
-            CARequestID = uuid,
-            StatusMessage = $"Renewal Successfully Submitted For {commonName}. Certificate will be available after next sync."
+            Status = (int)EndEntityStatus.EXTERNALVALIDATION, //success - pending DCV, not yet issued
+            CARequestID = renewResponse.Result.Status?.Uuid,
+            StatusMessage = $"Renewal Successfully Submitted For {renewResponse.Result.CommonName}",
+            EnrollmentContext = BuildDcvEnrollmentContext(renewResponse.Result.DcvDetails)
         };
+    }
+
+    // Builds the CNAME/email DCV instructions CSC Global returns on a submitted order into the
+    // key/value context Command surfaces to the requester, so they know what action is needed
+    // (create a CNAME record, or check their email) before the certificate will actually issue.
+    private static Dictionary<string, string> BuildDcvEnrollmentContext(List<DcvDetail> dcvDetails)
+    {
+        var cnames = new Dictionary<string, string>();
+        if (dcvDetails == null) return null;
+
+        foreach (var dcv in dcvDetails)
+        {
+            if (dcv.CName != null && !string.IsNullOrEmpty(dcv.CName.Name) && !string.IsNullOrEmpty(dcv.CName.Value))
+            {
+                cnames.Add(dcv.CName.Name, dcv.CName.Value);
+            }
+
+            if (!string.IsNullOrEmpty(dcv.Email) && !cnames.ContainsKey(dcv.Email))
+            {
+                cnames.Add(dcv.Email, dcv.Email);
+            }
+        }
+
+        return cnames.Count > 0 ? cnames : null;
     }
 
 
@@ -127,210 +138,142 @@ public class RequestManager
         GetEnrollmentResult(
             IRegistrationResponse registrationResponse)
     {
-        Logger.LogTrace("GetEnrollmentResult: registrationResponse is {Null}", registrationResponse == null ? "NULL" : "present");
-
         if (registrationResponse == null)
         {
-            Logger.LogError("GetEnrollmentResult: registrationResponse is null.");
+            Logger.LogError("Enrollment failed: CSC Global returned no response");
             return new EnrollmentResult
             {
-                Status = (int)EndEntityStatus.FAILED,
-                StatusMessage = "Enrollment failed: received null response from CSC."
+                Status = (int)EndEntityStatus.FAILED, //failure
+                StatusMessage = "CSC Global returned no response for the registration request"
             };
         }
 
         if (registrationResponse.RegistrationError != null)
         {
-            Logger.LogWarning("GetEnrollmentResult: RegistrationError present. Description='{Desc}'",
-                registrationResponse.RegistrationError.Description ?? "(null)");
+            Logger.LogError($"Enrollment failed: {registrationResponse.RegistrationError.Description}");
             return new EnrollmentResult
             {
-                Status = (int)EndEntityStatus.FAILED,
-                StatusMessage = registrationResponse.RegistrationError.Description ?? "Enrollment failed with unknown error."
+                Status = (int)EndEntityStatus.FAILED, //failure
+                StatusMessage = registrationResponse.RegistrationError.Description
             };
         }
 
         if (registrationResponse.Result == null)
         {
-            Logger.LogError("GetEnrollmentResult: Result is null but no RegistrationError present.");
+            Logger.LogError("Enrollment failed: CSC Global reported success but returned no result");
             return new EnrollmentResult
             {
-                Status = (int)EndEntityStatus.FAILED,
-                StatusMessage = "Enrollment failed: response Result is null."
+                Status = (int)EndEntityStatus.FAILED, //failure
+                StatusMessage = "CSC Global reported success but returned no result"
             };
         }
 
-        var cnames = new Dictionary<string, string>();
-        if (registrationResponse.Result.DcvDetails != null && registrationResponse.Result.DcvDetails.Count > 0)
-        {
-            Logger.LogTrace("GetEnrollmentResult: processing {Count} DcvDetails.", registrationResponse.Result.DcvDetails.Count);
-            foreach (var dcv in registrationResponse.Result.DcvDetails)
-            {
-                if (dcv == null)
-                {
-                    Logger.LogTrace("GetEnrollmentResult: skipping null DcvDetail.");
-                    continue;
-                }
-
-                if (dcv.CName != null && !string.IsNullOrEmpty(dcv.CName.Name) && !string.IsNullOrEmpty(dcv.CName.Value))
-                {
-                    if (!cnames.ContainsKey(dcv.CName.Name))
-                    {
-                        Logger.LogTrace("GetEnrollmentResult: adding CName '{Name}'='{Value}'", dcv.CName.Name, dcv.CName.Value);
-                        cnames.Add(dcv.CName.Name, dcv.CName.Value);
-                    }
-                    else
-                    {
-                        Logger.LogTrace("GetEnrollmentResult: duplicate CName key '{Name}', skipping.", dcv.CName.Name);
-                    }
-                }
-
-                if (!string.IsNullOrEmpty(dcv.Email) && !cnames.ContainsKey(dcv.Email))
-                {
-                    if (!cnames.ContainsKey(dcv.Email))
-                    {
-                        Logger.LogTrace("GetEnrollmentResult: adding DCV email '{Email}'", dcv.Email);
-                        cnames.Add(dcv.Email, dcv.Email);
-                    }
-                    else
-                    {
-                        Logger.LogTrace("GetEnrollmentResult: duplicate email key '{Email}', skipping.", dcv.Email);
-                    }
-                }
-            }
-        }
-        else
-        {
-            Logger.LogTrace("GetEnrollmentResult: no DcvDetails to process.");
-        }
-
-        var uuid = registrationResponse.Result.Status?.Uuid;
-        var commonName = registrationResponse.Result.CommonName ?? "(unknown)";
-        Logger.LogTrace("GetEnrollmentResult: success. UUID='{Uuid}', CommonName='{CommonName}', cnames count={Count}",
-            uuid ?? "(null)", commonName, cnames.Count);
-
+        Logger.LogInformation($"Order successfully created with order number {registrationResponse.Result.CommonName}");
         return new EnrollmentResult
         {
-            Status = (int)EndEntityStatus.EXTERNALVALIDATION,
-            CARequestID = uuid,
+            Status = (int)EndEntityStatus.EXTERNALVALIDATION, //success
+            CARequestID = registrationResponse.Result.Status?.Uuid,
             StatusMessage =
-                $"Order Successfully Created With Order Number {commonName}",
-            EnrollmentContext = cnames.Count > 0 ? cnames : null
+                $"Order Successfully Created With Order Number {registrationResponse.Result.CommonName}",
+            EnrollmentContext = BuildDcvEnrollmentContext(registrationResponse.Result.DcvDetails)
         };
     }
 
     public int GetRevokeResult(IRevokeResponse revokeResponse)
     {
-        Logger.LogTrace("GetRevokeResult: revokeResponse is {Null}", revokeResponse == null ? "NULL" : "present");
-
         if (revokeResponse == null)
         {
-            Logger.LogError("GetRevokeResult: revokeResponse is null, returning FAILED.");
+            Logger.LogError("Revoke failed: CSC Global returned no response");
             return (int)EndEntityStatus.FAILED;
         }
 
         if (revokeResponse.RegistrationError != null)
         {
-            Logger.LogWarning("GetRevokeResult: RegistrationError present. Description='{Desc}'",
-                revokeResponse.RegistrationError.Description ?? "(null)");
+            Logger.LogError($"Revoke failed: {revokeResponse.RegistrationError.Description}");
             return (int)EndEntityStatus.FAILED;
         }
 
-        Logger.LogTrace("GetRevokeResult: returning REVOKED.");
         return (int)EndEntityStatus.REVOKED;
     }
 
     public EnrollmentResult GetReIssueResult(IReissueResponse reissueResponse)
     {
-        Logger.LogTrace("GetReIssueResult: reissueResponse is {Null}", reissueResponse == null ? "NULL" : "present");
-
         if (reissueResponse == null)
         {
-            Logger.LogError("GetReIssueResult: reissueResponse is null.");
+            Logger.LogError("Reissue failed: CSC Global returned no response");
             return new EnrollmentResult
             {
-                Status = (int)EndEntityStatus.FAILED,
-                StatusMessage = "Reissue failed: received null response from CSC."
+                Status = (int)EndEntityStatus.FAILED, //failure
+                StatusMessage = "CSC Global returned no response for the reissue request"
             };
         }
 
         if (reissueResponse.RegistrationError != null)
         {
-            Logger.LogWarning("GetReIssueResult: RegistrationError present. Description='{Desc}'",
-                reissueResponse.RegistrationError.Description ?? "(null)");
+            Logger.LogError($"Reissue failed: {reissueResponse.RegistrationError.Description}");
             return new EnrollmentResult
             {
-                Status = (int)EndEntityStatus.FAILED,
-                StatusMessage = reissueResponse.RegistrationError.Description ?? "Reissue failed with unknown error."
+                Status = (int)EndEntityStatus.FAILED, //failure
+                StatusMessage = reissueResponse.RegistrationError.Description
             };
         }
 
         if (reissueResponse.Result == null)
         {
-            Logger.LogError("GetReIssueResult: Result is null but no RegistrationError present.");
+            Logger.LogError("Reissue failed: CSC Global reported success but returned no result");
             return new EnrollmentResult
             {
-                Status = (int)EndEntityStatus.FAILED,
-                StatusMessage = "Reissue failed: response Result is null."
+                Status = (int)EndEntityStatus.FAILED, //failure
+                StatusMessage = "CSC Global reported success but returned no result"
             };
         }
 
-        var uuid = reissueResponse.Result.Status?.Uuid;
-        var commonName = reissueResponse.Result.CommonName ?? "(unknown)";
-        Logger.LogTrace("GetReIssueResult: success. UUID='{Uuid}', CommonName='{CommonName}'", uuid ?? "(null)", commonName);
-
+        // Same as renewal: CSC Global submits the reissue but still requires DCV before the
+        // certificate is actually issued, so this must not claim GENERATED here.
+        Logger.LogInformation($"Reissue successfully submitted for {reissueResponse.Result.CommonName}");
         return new EnrollmentResult
         {
-            Status = (int)EndEntityStatus.EXTERNALVALIDATION,
-            CARequestID = uuid,
-            StatusMessage = $"Reissue Successfully Submitted For {commonName}. Certificate will be available after next sync."
+            Status = (int)EndEntityStatus.EXTERNALVALIDATION, //success - pending DCV, not yet issued
+            CARequestID = reissueResponse.Result.Status?.Uuid,
+            StatusMessage = $"Reissue Successfully Submitted For {reissueResponse.Result.CommonName}",
+            EnrollmentContext = BuildDcvEnrollmentContext(reissueResponse.Result.DcvDetails)
         };
     }
 
     public DomainControlValidation GetDomainControlValidation(string methodType, string[] emailAddress,
         string domainName)
     {
-        Logger.LogTrace("GetDomainControlValidation(array): methodType='{MethodType}', domainName='{DomainName}', emailAddress count={Count}",
-            methodType ?? "(null)", domainName ?? "(null)", emailAddress?.Length ?? 0);
-
-        if (emailAddress == null || emailAddress.Length == 0)
+        if (string.IsNullOrWhiteSpace(domainName))
         {
-            Logger.LogTrace("GetDomainControlValidation(array): no email addresses provided, returning null.");
+            Logger.LogWarning("GetDomainControlValidation called with an empty domain name");
             return null;
         }
 
-        foreach (var address in emailAddress)
+        foreach (var address in emailAddress ?? Array.Empty<string>())
         {
-            if (string.IsNullOrEmpty(address))
-            {
-                Logger.LogTrace("GetDomainControlValidation(array): skipping null/empty email address.");
-                continue;
-            }
+            if (string.IsNullOrWhiteSpace(address)) continue;
 
+            MailAddress email;
             try
             {
-                var email = new MailAddress(address);
-                var hostPart = email.Host?.Split('.')[0] ?? "";
-                Logger.LogTrace("GetDomainControlValidation(array): checking email='{Email}', hostPart='{HostPart}' against domain='{Domain}'",
-                    address, hostPart, domainName);
-
-                if (!string.IsNullOrEmpty(domainName) && domainName.Contains(hostPart))
-                {
-                    Logger.LogTrace("GetDomainControlValidation(array): matched! Returning email='{Email}'", email.ToString());
-                    return new DomainControlValidation
-                    {
-                        MethodType = methodType,
-                        EmailAddress = email.ToString()
-                    };
-                }
+                email = new MailAddress(address.Trim());
             }
             catch (FormatException fex)
             {
-                Logger.LogWarning("GetDomainControlValidation(array): invalid email address '{Address}': {Message}", address, fex.Message);
+                Logger.LogWarning(fex, $"Skipping malformed DCV email address '{address}'");
+                continue;
             }
+
+            var hostLabels = email.Host.Split('.');
+            if (hostLabels.Length > 0 && domainName.Contains(hostLabels[0]))
+                return new DomainControlValidation
+                {
+                    MethodType = methodType,
+                    EmailAddress = email.ToString()
+                };
         }
 
-        Logger.LogTrace("GetDomainControlValidation(array): no matching email found, returning null.");
+        Logger.LogWarning($"No matching DCV email address found for domain {domainName}");
         return null;
     }
 
@@ -346,174 +289,102 @@ public class RequestManager
     public RegistrationRequest GetRegistrationRequest(EnrollmentProductInfo productInfo, string csr,
         Dictionary<string, string[]> sans, List<GetCustomField> customFields)
     {
-        Logger.LogTrace("GetRegistrationRequest: building registration request. ProductID='{ProductId}'", productInfo?.ProductID ?? "(null)");
-
-        if (productInfo?.ProductParameters == null)
-            throw new ArgumentNullException(nameof(productInfo), "productInfo or ProductParameters cannot be null.");
-        if (string.IsNullOrEmpty(csr))
-            throw new ArgumentNullException(nameof(csr), "CSR cannot be null or empty.");
-
+        Logger.LogTrace($"Building registration request for product {productInfo.ProductID}");
+        //var cert = "-----BEGIN CERTIFICATE REQUEST-----\r\n";
         var cert = Pemify(csr);
+        //cert = cert + "\r\n-----END CERTIFICATE REQUEST-----";
+
+
         var bytes = Encoding.UTF8.GetBytes(cert);
         var encodedString = Convert.ToBase64String(bytes);
-        Logger.LogTrace("GetRegistrationRequest: CSR encoded, length={Length}", encodedString.Length);
-
-        var commonNameValidationEmail = productInfo.ProductParameters.ContainsKey("CN DCV Email")
-            ? productInfo.ProductParameters["CN DCV Email"] : null;
-        var methodType = productInfo.ProductParameters.ContainsKey("Domain Control Validation Method")
-            ? productInfo.ProductParameters["Domain Control Validation Method"] : null;
+        var commonNameValidationEmail = GetOptionalParam(productInfo, "CN DCV Email");
+        var methodType = GetOptionalParam(productInfo, "Domain Control Validation Method");
         var certificateType = GetCertificateType(productInfo.ProductID);
-
-        Logger.LogTrace("GetRegistrationRequest: cnDcvEmail='{Email}', methodType='{Method}', certType='{CertType}'",
-            commonNameValidationEmail ?? "(null)", methodType ?? "(null)", certificateType);
 
         return new RegistrationRequest
         {
             Csr = encodedString,
-            ServerSoftware = "-1",
+            ServerSoftware = "-1", //Just default to other, user does not need to fill this in
             CertificateType = certificateType,
-            Term = productInfo.ProductParameters.ContainsKey("Term") ? productInfo.ProductParameters["Term"] : null,
-            ApplicantFirstName = productInfo.ProductParameters.ContainsKey("Applicant First Name") ? productInfo.ProductParameters["Applicant First Name"] : null,
-            ApplicantLastName = productInfo.ProductParameters.ContainsKey("Applicant Last Name") ? productInfo.ProductParameters["Applicant Last Name"] : null,
-            ApplicantEmailAddress = productInfo.ProductParameters.ContainsKey("Applicant Email Address") ? productInfo.ProductParameters["Applicant Email Address"] : null,
-            ApplicantPhoneNumber = productInfo.ProductParameters.ContainsKey("Applicant Phone") ? productInfo.ProductParameters["Applicant Phone"] : null,
+            Term = GetOptionalParam(productInfo, "Term"),
+            ApplicantFirstName = GetOptionalParam(productInfo, "Applicant First Name"),
+            ApplicantLastName = GetOptionalParam(productInfo, "Applicant Last Name"),
+            ApplicantEmailAddress = GetOptionalParam(productInfo, "Applicant Email Address"),
+            ApplicantPhoneNumber = GetOptionalParam(productInfo, "Applicant Phone"),
             DomainControlValidation = GetDomainControlValidation(methodType, commonNameValidationEmail),
             Notifications = GetNotifications(productInfo),
-            OrganizationContact = productInfo.ProductParameters.ContainsKey("Organization Contact") ? productInfo.ProductParameters["Organization Contact"] : null,
-            BusinessUnit = productInfo.ProductParameters.ContainsKey("Business Unit") ? productInfo.ProductParameters["Business Unit"] : null,
-            ShowPrice = true,
+            OrganizationContact = GetOptionalParam(productInfo, "Organization Contact"),
+            BusinessUnit = GetOptionalParam(productInfo, "Business Unit"),
+            ShowPrice = true, //User should not have to fill this out
             CustomFields = GetCustomFields(productInfo, customFields),
             SubjectAlternativeNames = MultiNameCertificateTypes.Contains(certificateType) ? GetSubjectAlternativeNames(productInfo, sans) : null,
             EvCertificateDetails = EvCertificateTypes.Contains(certificateType) ? GetEvCertificateDetails(productInfo) : null
         };
     }
 
-    // Maps Keyfactor product ID -> CSC API certificate type code (used for enrollment requests)
-    private static readonly Dictionary<string, string> ProductIdToCodeMap = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ["CSC TrustedSecure Premium Certificate"] = "0",
-        ["CSC TrustedSecure Premium Wildcard Certificate"] = "1",
-        ["CSC TrustedSecure UC Certificate"] = "2",
-        ["CSC TrustedSecure EV Certificate"] = "3",
-        ["CSC TrustedSecure Domain Validated SSL"] = "4",
-        ["CSC Trusted Secure Domain Validated SSL"] = "4",
-        ["CSC Trusted Secure Domain Validated Wildcard SSL"] = "5",
-        ["CSC Trusted Secure Domain Validated UC Certificate"] = "6",
-    };
-
-    // Reverse map: CSC API certificateType string -> Keyfactor product ID (used during sync)
-    // Note: CSC naming is inconsistent — first 4 types use "TrustedSecure" (no space),
-    //       DV Wildcard and DV UC use "Trusted Secure" (with space),
-    //       but CSC API returns DV SSL as "CSC Trusted Secure Domain Validated SSL" (with space)
-    //       while the product ID is "CSC TrustedSecure Domain Validated SSL" (no space).
-    private static readonly Dictionary<string, string> CodeToProductIdMap = new(StringComparer.OrdinalIgnoreCase)
-    {
-        // Premium
-        ["0"] = "CSC TrustedSecure Premium Certificate",
-        ["CSC TrustedSecure Premium Certificate"] = "CSC TrustedSecure Premium Certificate",
-        ["CSC Trusted Secure Premium Certificate"] = "CSC TrustedSecure Premium Certificate",
-        // Premium Wildcard
-        ["1"] = "CSC TrustedSecure Premium Wildcard Certificate",
-        ["CSC TrustedSecure Premium Wildcard Certificate"] = "CSC TrustedSecure Premium Wildcard Certificate",
-        ["CSC Trusted Secure Premium Wildcard Certificate"] = "CSC TrustedSecure Premium Wildcard Certificate",
-        // UC
-        ["2"] = "CSC TrustedSecure UC Certificate",
-        ["CSC TrustedSecure UC Certificate"] = "CSC TrustedSecure UC Certificate",
-        ["CSC Trusted Secure UC Certificate"] = "CSC TrustedSecure UC Certificate",
-        // EV
-        ["3"] = "CSC TrustedSecure EV Certificate",
-        ["CSC TrustedSecure EV Certificate"] = "CSC TrustedSecure EV Certificate",
-        ["CSC Trusted Secure EV Certificate"] = "CSC TrustedSecure EV Certificate",
-        // DV SSL — product ID has no space, but CSC API returns with space
-        ["4"] = "CSC TrustedSecure Domain Validated SSL",
-        ["CSC TrustedSecure Domain Validated SSL"] = "CSC TrustedSecure Domain Validated SSL",
-        ["CSC Trusted Secure Domain Validated SSL"] = "CSC TrustedSecure Domain Validated SSL",
-        // DV Wildcard — product ID has space (matches CSC API)
-        ["5"] = "CSC Trusted Secure Domain Validated Wildcard SSL",
-        ["CSC Trusted Secure Domain Validated Wildcard SSL"] = "CSC Trusted Secure Domain Validated Wildcard SSL",
-        ["CSC TrustedSecure Domain Validated Wildcard SSL"] = "CSC Trusted Secure Domain Validated Wildcard SSL",
-        // DV UC — product ID has space (matches CSC API)
-        ["6"] = "CSC Trusted Secure Domain Validated UC Certificate",
-        ["CSC Trusted Secure Domain Validated UC Certificate"] = "CSC Trusted Secure Domain Validated UC Certificate",
-        ["CSC TrustedSecure Domain Validated UC Certificate"] = "CSC Trusted Secure Domain Validated UC Certificate",
-    };
-
     private string GetCertificateType(string productId)
     {
-        Logger.LogTrace("GetCertificateType: productId='{ProductId}'", productId ?? "(null)");
-        if (!string.IsNullOrEmpty(productId) && ProductIdToCodeMap.TryGetValue(productId, out var code))
+        if (productId != null && ProductIDs.legacyProductIdAliases.TryGetValue(productId, out var canonicalProductId))
         {
-            Logger.LogTrace("GetCertificateType: mapped '{ProductId}' -> '{Code}'", productId, code);
-            return code;
+            productId = canonicalProductId;
         }
-        Logger.LogWarning("GetCertificateType: no mapping found for '{ProductId}', returning -1.", productId);
+
+        switch (productId)
+        {
+            case "CSC TrustedSecure OV":
+                return "0";
+            case "CSC TrustedSecure OV Wildcard":
+                return "1";
+            case "CSC TrustedSecure OV, Multiple Names":
+                return "2";
+            case "CSC TrustedSecure EV":
+                return "3";
+            case "CSC TrustedSecure DV":
+                return "4";
+            case "CSC TrustedSecure DV Wildcard":
+                return "5";
+            case "CSC TrustedSecure DV, Multiple Names":
+                return "6";
+            case "CSC TrustedSecure EV, Multiple Names":
+                return "7";
+            case "CSC TrustedSecure OV Wildcard, Multiple Names":
+                return "8";
+            case "CSC TrustedSecure DV Wildcard, Multiple Names":
+                return "9";
+        }
+
+        Logger.LogWarning($"Unrecognized product ID '{productId}'; defaulting certificate type to -1");
         return "-1";
     }
 
-    /// <summary>
-    ///     Maps a CSC API certificateType value back to a Keyfactor product ID.
-    ///     Handles numeric codes, descriptive strings, and passthrough of already-correct values.
-    /// </summary>
-    public string MapCertificateTypeToProductId(string cscCertificateType)
-    {
-        Logger.LogTrace("MapCertificateTypeToProductId: input='{CscCertType}'", cscCertificateType ?? "(null)");
-        if (!string.IsNullOrEmpty(cscCertificateType) && CodeToProductIdMap.TryGetValue(cscCertificateType, out var productId))
-        {
-            Logger.LogTrace("MapCertificateTypeToProductId: mapped '{CscCertType}' -> '{ProductId}'", cscCertificateType, productId);
-            return productId;
-        }
-        Logger.LogWarning("MapCertificateTypeToProductId: no mapping for '{CscCertType}', passing through as-is.", cscCertificateType);
-        return cscCertificateType ?? "CscGlobal";
-    }
+    private static readonly HashSet<string> MultiNameCertificateTypes = new() { "2", "6", "7", "8", "9" };
+    private static readonly HashSet<string> EvCertificateTypes = new() { "3", "7" };
 
     public Notifications GetNotifications(EnrollmentProductInfo productInfo)
     {
-        Logger.LogTrace("GetNotifications: building notifications.");
-        var emailsRaw = productInfo?.ProductParameters != null
-            && productInfo.ProductParameters.ContainsKey("Notification Email(s) Comma Separated")
-            ? productInfo.ProductParameters["Notification Email(s) Comma Separated"]
-            : null;
-
-        Logger.LogTrace("GetNotifications: raw notification emails='{Emails}'", emailsRaw ?? "(null)");
-
-        var emailList = !string.IsNullOrEmpty(emailsRaw)
-            ? emailsRaw.Split(',').Where(e => !string.IsNullOrWhiteSpace(e)).ToList()
-            : new List<string>();
-
-        Logger.LogTrace("GetNotifications: parsed {Count} notification emails.", emailList.Count);
-
+        var notificationEmails = GetOptionalParam(productInfo, "Notification Email(s) Comma Separated");
         return new Notifications
         {
             Enabled = true,
-            AdditionalNotificationEmails = emailList
+            AdditionalNotificationEmails = string.IsNullOrWhiteSpace(notificationEmails)
+                ? new List<string>()
+                : notificationEmails.Split(',').ToList()
         };
     }
 
     public RenewalRequest GetRenewalRequest(EnrollmentProductInfo productInfo, string uUId, string csr,
         Dictionary<string, string[]> sans, List<GetCustomField> customFields)
     {
-        Logger.LogTrace("GetRenewalRequest: building renewal request. UUID='{Uuid}', ProductID='{ProductId}'",
-            uUId ?? "(null)", productInfo?.ProductID ?? "(null)");
-
-        if (productInfo?.ProductParameters == null)
-            throw new ArgumentNullException(nameof(productInfo), "productInfo or ProductParameters cannot be null.");
-        if (string.IsNullOrEmpty(csr))
-            throw new ArgumentNullException(nameof(csr), "CSR cannot be null or empty.");
-        if (string.IsNullOrEmpty(uUId))
-            throw new ArgumentNullException(nameof(uUId), "uUId cannot be null or empty.");
-
+        Logger.LogTrace($"Building renewal request for product {productInfo.ProductID}, UUID {uUId}");
+        //var cert = "-----BEGIN CERTIFICATE REQUEST-----\r\n";
         var cert = Pemify(csr);
+        //cert = cert + "\r\n-----END CERTIFICATE REQUEST-----";
+
         var bytes = Encoding.UTF8.GetBytes(cert);
         var encodedString = Convert.ToBase64String(bytes);
-
-        var commonNameValidationEmail = productInfo.ProductParameters.ContainsKey("CN DCV Email")
-            ? productInfo.ProductParameters["CN DCV Email"] : null;
-        var methodType = productInfo.ProductParameters.ContainsKey("Domain Control Validation Method")
-            ? productInfo.ProductParameters["Domain Control Validation Method"] : null;
+        var commonNameValidationEmail = GetOptionalParam(productInfo, "CN DCV Email");
+        var methodType = GetOptionalParam(productInfo, "Domain Control Validation Method");
         var certificateType = GetCertificateType(productInfo.ProductID);
-
-        Logger.LogTrace("GetRenewalRequest: cnDcvEmail='{Email}', methodType='{Method}', certType='{CertType}'",
-            commonNameValidationEmail ?? "(null)", methodType ?? "(null)", certificateType);
 
         return new RenewalRequest
         {
@@ -521,15 +392,15 @@ public class RequestManager
             Csr = encodedString,
             ServerSoftware = "-1",
             CertificateType = certificateType,
-            Term = productInfo.ProductParameters.ContainsKey("Term") ? productInfo.ProductParameters["Term"] : null,
-            ApplicantFirstName = productInfo.ProductParameters.ContainsKey("Applicant First Name") ? productInfo.ProductParameters["Applicant First Name"] : null,
-            ApplicantLastName = productInfo.ProductParameters.ContainsKey("Applicant Last Name") ? productInfo.ProductParameters["Applicant Last Name"] : null,
-            ApplicantEmailAddress = productInfo.ProductParameters.ContainsKey("Applicant Email Address") ? productInfo.ProductParameters["Applicant Email Address"] : null,
-            ApplicantPhoneNumber = productInfo.ProductParameters.ContainsKey("Applicant Phone") ? productInfo.ProductParameters["Applicant Phone"] : null,
+            Term = GetOptionalParam(productInfo, "Term"),
+            ApplicantFirstName = GetOptionalParam(productInfo, "Applicant First Name"),
+            ApplicantLastName = GetOptionalParam(productInfo, "Applicant Last Name"),
+            ApplicantEmailAddress = GetOptionalParam(productInfo, "Applicant Email Address"),
+            ApplicantPhoneNumber = GetOptionalParam(productInfo, "Applicant Phone"),
             DomainControlValidation = GetDomainControlValidation(methodType, commonNameValidationEmail),
             Notifications = GetNotifications(productInfo),
-            OrganizationContact = productInfo.ProductParameters.ContainsKey("Organization Contact") ? productInfo.ProductParameters["Organization Contact"] : null,
-            BusinessUnit = productInfo.ProductParameters.ContainsKey("Business Unit") ? productInfo.ProductParameters["Business Unit"] : null,
+            OrganizationContact = GetOptionalParam(productInfo, "Organization Contact"),
+            BusinessUnit = GetOptionalParam(productInfo, "Business Unit"),
             ShowPrice = true,
             SubjectAlternativeNames = MultiNameCertificateTypes.Contains(certificateType) ? GetSubjectAlternativeNames(productInfo, sans) : null,
             CustomFields = GetCustomFields(productInfo, customFields),
@@ -540,91 +411,51 @@ public class RequestManager
     private List<SubjectAlternativeName> GetSubjectAlternativeNames(EnrollmentProductInfo productInfo,
         Dictionary<string, string[]> sans)
     {
-        Logger.LogTrace("GetSubjectAlternativeNames: building SANs.");
         var subjectNameList = new List<SubjectAlternativeName>();
+        var methodType = GetOptionalParam(productInfo, "Domain Control Validation Method");
+        var commonNameValidationEmail = GetOptionalParam(productInfo, "CN DCV Email");
 
-        if (sans == null || !sans.ContainsKey("dnsname"))
+        string[] dnsNames = null;
+        sans?.TryGetValue("dnsname", out dnsNames);
+        foreach (var v in dnsNames ?? Array.Empty<string>())
         {
-            Logger.LogTrace("GetSubjectAlternativeNames: no 'dnsname' key in SANs dictionary, returning empty list.");
-            return subjectNameList;
-        }
-
-        var dnsNames = sans["dnsname"];
-        if (dnsNames == null || dnsNames.Length == 0)
-        {
-            Logger.LogTrace("GetSubjectAlternativeNames: 'dnsname' array is null or empty, returning empty list.");
-            return subjectNameList;
-        }
-
-        var methodType = productInfo?.ProductParameters != null
-            && productInfo.ProductParameters.ContainsKey("Domain Control Validation Method")
-            ? productInfo.ProductParameters["Domain Control Validation Method"]
-            : null;
-
-        Logger.LogTrace("GetSubjectAlternativeNames: processing {Count} DNS names, methodType='{MethodType}'",
-            dnsNames.Length, methodType ?? "(null)");
-
-        foreach (var v in dnsNames)
-        {
-            if (string.IsNullOrEmpty(v))
-            {
-                Logger.LogTrace("GetSubjectAlternativeNames: skipping null/empty DNS name.");
-                continue;
-            }
-
             var domainName = v;
             var san = new SubjectAlternativeName();
             san.DomainName = domainName;
-            Logger.LogTrace("GetSubjectAlternativeNames: processing domain='{Domain}'", domainName);
+            if (methodType.ToUpper() == "EMAIL")
+            {
+                productInfo.ProductParameters.TryGetValue(EnrollmentConfigConstants.AdditionalSansCommaSeparatedDcvEmails, out var addtlSansEmails);
+                var emailAddresses = string.IsNullOrWhiteSpace(addtlSansEmails)
+                    ? Array.Empty<string>()
+                    : addtlSansEmails.Split(',');
 
-            if (!string.IsNullOrEmpty(methodType) && methodType.ToUpper() == "EMAIL")
-            {
-                var emailsRaw = productInfo.ProductParameters.ContainsKey("Addtl Sans Comma Separated DVC Emails")
-                    ? productInfo.ProductParameters["Addtl Sans Comma Separated DVC Emails"]
-                    : null;
-                var emailAddresses = !string.IsNullOrEmpty(emailsRaw) ? emailsRaw.Split(',') : Array.Empty<string>();
-                Logger.LogTrace("GetSubjectAlternativeNames: EMAIL validation, {Count} email addresses for domain='{Domain}'",
-                    emailAddresses.Length, domainName);
-                san.DomainControlValidation = GetDomainControlValidation(methodType, emailAddresses, domainName);
+                // Fall back to the primary CN's DCV email when no per-domain override matches;
+                // CSC Global rejects the request if a SAN entry is missing domainControlValidation.
+                san.DomainControlValidation = GetDomainControlValidation(methodType, emailAddresses, domainName)
+                    ?? GetDomainControlValidation(methodType, commonNameValidationEmail);
             }
-            else
-            {
-                Logger.LogTrace("GetSubjectAlternativeNames: CNAME/other validation for domain='{Domain}'", domainName);
-                san.DomainControlValidation = GetDomainControlValidation(methodType, "");
-            }
+            else //it is a CNAME validation - mirror the primary CN's DCV, no email is needed
+                san.DomainControlValidation = GetDomainControlValidation(methodType, commonNameValidationEmail);
 
             subjectNameList.Add(san);
         }
 
-        Logger.LogTrace("GetSubjectAlternativeNames: returning {Count} SANs.", subjectNameList.Count);
         return subjectNameList;
     }
 
     public ReissueRequest GetReissueRequest(EnrollmentProductInfo productInfo, string uUId, string csr,
         Dictionary<string, string[]> sans, List<GetCustomField> customFields)
     {
-        Logger.LogTrace("GetReissueRequest: building reissue request. UUID='{Uuid}', ProductID='{ProductId}'",
-            uUId ?? "(null)", productInfo?.ProductID ?? "(null)");
-
-        if (productInfo?.ProductParameters == null)
-            throw new ArgumentNullException(nameof(productInfo), "productInfo or ProductParameters cannot be null.");
-        if (string.IsNullOrEmpty(csr))
-            throw new ArgumentNullException(nameof(csr), "CSR cannot be null or empty.");
-        if (string.IsNullOrEmpty(uUId))
-            throw new ArgumentNullException(nameof(uUId), "uUId cannot be null or empty.");
-
+        Logger.LogTrace($"Building reissue request for product {productInfo.ProductID}, UUID {uUId}");
+        //var cert = "-----BEGIN CERTIFICATE REQUEST-----\r\n";
         var cert = Pemify(csr);
+        //cert = cert + "\r\n-----END CERTIFICATE REQUEST-----";
+
         var bytes = Encoding.UTF8.GetBytes(cert);
         var encodedString = Convert.ToBase64String(bytes);
-
-        var commonNameValidationEmail = productInfo.ProductParameters.ContainsKey("CN DCV Email")
-            ? productInfo.ProductParameters["CN DCV Email"] : null;
-        var methodType = productInfo.ProductParameters.ContainsKey("Domain Control Validation Method")
-            ? productInfo.ProductParameters["Domain Control Validation Method"] : null;
+        var commonNameValidationEmail = GetOptionalParam(productInfo, "CN DCV Email");
+        var methodType = GetOptionalParam(productInfo, "Domain Control Validation Method");
         var certificateType = GetCertificateType(productInfo.ProductID);
-
-        Logger.LogTrace("GetReissueRequest: cnDcvEmail='{Email}', methodType='{Method}', certType='{CertType}'",
-            commonNameValidationEmail ?? "(null)", methodType ?? "(null)", certificateType);
 
         return new ReissueRequest
         {
@@ -632,15 +463,15 @@ public class RequestManager
             Csr = encodedString,
             ServerSoftware = "-1",
             CertificateType = certificateType,
-            Term = productInfo.ProductParameters.ContainsKey("Term") ? productInfo.ProductParameters["Term"] : null,
-            ApplicantFirstName = productInfo.ProductParameters.ContainsKey("Applicant First Name") ? productInfo.ProductParameters["Applicant First Name"] : null,
-            ApplicantLastName = productInfo.ProductParameters.ContainsKey("Applicant Last Name") ? productInfo.ProductParameters["Applicant Last Name"] : null,
-            ApplicantEmailAddress = productInfo.ProductParameters.ContainsKey("Applicant Email Address") ? productInfo.ProductParameters["Applicant Email Address"] : null,
-            ApplicantPhoneNumber = productInfo.ProductParameters.ContainsKey("Applicant Phone") ? productInfo.ProductParameters["Applicant Phone"] : null,
+            Term = GetOptionalParam(productInfo, "Term"),
+            ApplicantFirstName = GetOptionalParam(productInfo, "Applicant First Name"),
+            ApplicantLastName = GetOptionalParam(productInfo, "Applicant Last Name"),
+            ApplicantEmailAddress = GetOptionalParam(productInfo, "Applicant Email Address"),
+            ApplicantPhoneNumber = GetOptionalParam(productInfo, "Applicant Phone"),
             DomainControlValidation = GetDomainControlValidation(methodType, commonNameValidationEmail),
             Notifications = GetNotifications(productInfo),
-            OrganizationContact = productInfo.ProductParameters.ContainsKey("Organization Contact") ? productInfo.ProductParameters["Organization Contact"] : null,
-            BusinessUnit = productInfo.ProductParameters.ContainsKey("Business Unit") ? productInfo.ProductParameters["Business Unit"] : null,
+            OrganizationContact = GetOptionalParam(productInfo, "Organization Contact"),
+            BusinessUnit = GetOptionalParam(productInfo, "Business Unit"),
             ShowPrice = true,
             SubjectAlternativeNames = MultiNameCertificateTypes.Contains(certificateType) ? GetSubjectAlternativeNames(productInfo, sans) : null,
             CustomFields = GetCustomFields(productInfo, customFields),
@@ -650,28 +481,15 @@ public class RequestManager
 
     private EvCertificateDetails GetEvCertificateDetails(EnrollmentProductInfo productInfo)
     {
-        Logger.LogTrace("GetEvCertificateDetails: building EV details.");
-        var country = productInfo?.ProductParameters != null
-            && productInfo.ProductParameters.ContainsKey("Organization Country")
-            ? productInfo.ProductParameters["Organization Country"]
-            : null;
-        Logger.LogTrace("GetEvCertificateDetails: country='{Country}'", country ?? "(null)");
         var evDetails = new EvCertificateDetails();
-        evDetails.Country = country;
+        evDetails.Country = GetOptionalParam(productInfo, "Organization Country");
         return evDetails;
     }
 
     public int MapReturnStatus(string cscGlobalStatus)
     {
-        Logger.LogTrace("MapReturnStatus: input status='{Status}'", cscGlobalStatus ?? "(null)");
-
-        if (string.IsNullOrEmpty(cscGlobalStatus))
-        {
-            Logger.LogWarning("MapReturnStatus: status is null or empty, returning FAILED.");
-            return (int)EndEntityStatus.FAILED;
-        }
-
         int returnStatus;
+
         switch (cscGlobalStatus)
         {
             case "ACTIVE":
@@ -687,12 +505,11 @@ public class RequestManager
                 returnStatus = (int)EndEntityStatus.REVOKED;
                 break;
             default:
-                Logger.LogWarning("MapReturnStatus: unrecognized status '{Status}', returning FAILED.", cscGlobalStatus);
+                Logger.LogWarning($"Unrecognized CSC Global status '{cscGlobalStatus}'; mapping to FAILED");
                 returnStatus = (int)EndEntityStatus.FAILED;
                 break;
         }
 
-        Logger.LogTrace("MapReturnStatus: mapped '{Status}' to {Result}", cscGlobalStatus, returnStatus);
         return returnStatus;
     }
 }

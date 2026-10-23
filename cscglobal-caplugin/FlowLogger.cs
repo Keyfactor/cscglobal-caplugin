@@ -11,231 +11,296 @@ using Microsoft.Extensions.Logging;
 
 namespace Keyfactor.Extensions.CAPlugin.CSCGlobal;
 
-public enum FlowStepStatus
-{
-    Success,
-    Failed,
-    Skipped,
-    InProgress
-}
-
-public class FlowStep
-{
-    public string Name { get; set; }
-    public FlowStepStatus Status { get; set; }
-    public string Detail { get; set; }
-    public long ElapsedMs { get; set; }
-    public List<FlowStep> Children { get; } = new();
-}
-
 /// <summary>
-///     Tracks high-level operation flow and renders a visual step diagram to Trace logs.
-///     Usage:
-///       using var flow = new FlowLogger(logger, "Enroll-New");
-///       flow.Step("ParseCSR");
-///       flow.Step("ValidateCSR", () => { ... });
-///       flow.Fail("CreateOrder", "API returned 400");
-///       // flow renders automatically on Dispose
+///     Step-oriented trace logger for CA plugin pipelines. Wraps a sequence of named steps with
+///     timings, branches, and outcomes into a single appended summary block that is attached
+///     to <see cref="EnrollmentResult.StatusMessage" /> on both success and failure, giving
+///     operators a single scannable breadcrumb trail per plugin operation (Enroll, Revoke, Sync).
 /// </summary>
-public sealed class FlowLogger : IDisposable
+public class FlowLogger : IDisposable
 {
     private readonly ILogger _logger;
     private readonly string _flowName;
-    private readonly Stopwatch _totalTimer;
+    private readonly Stopwatch _overallStopwatch;
     private readonly List<FlowStep> _steps = new();
-    private FlowStep _currentParent;
-    private bool _disposed;
+    private readonly Stack<string> _branchStack = new();
 
     public FlowLogger(ILogger logger, string flowName)
     {
-        _logger = logger;
-        _flowName = flowName;
-        _totalTimer = Stopwatch.StartNew();
-        _logger.LogTrace("===== FLOW START: {FlowName} =====", _flowName);
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _flowName = flowName ?? throw new ArgumentNullException(nameof(flowName));
+        _overallStopwatch = Stopwatch.StartNew();
+        _logger.LogTrace("[FLOW:{FlowName}] === BEGIN ===", _flowName);
     }
 
-    /// <summary>Record a completed step.</summary>
-    public FlowLogger Step(string name, string detail = null)
+    public void Step(string name, string detail = null)
     {
-        var step = new FlowStep { Name = name, Status = FlowStepStatus.Success, Detail = detail };
-        AddStep(step);
-        _logger.LogTrace("  [{FlowName}] {StepName} ... OK{Detail}",
-            _flowName, name, detail != null ? $" ({detail})" : "");
-        return this;
+        var step = new FlowStep { Name = name, Detail = detail, Status = StepStatus.Success };
+        _steps.Add(step);
+        var prefix = GetPrefix();
+        if (detail != null)
+            _logger.LogTrace("[FLOW:{FlowName}] {Prefix}[OK] {StepName} - {Detail}", _flowName, prefix, name, detail);
+        else
+            _logger.LogTrace("[FLOW:{FlowName}] {Prefix}[OK] {StepName}", _flowName, prefix, name);
     }
 
-    /// <summary>Record a step that executes an action and times it.</summary>
-    public FlowLogger Step(string name, Action action, string detail = null)
+    public void Step(string name, Action action, string detail = null)
     {
         var sw = Stopwatch.StartNew();
         var step = new FlowStep { Name = name, Detail = detail };
         try
         {
-            _logger.LogTrace("  [{FlowName}] {StepName} ...", _flowName, name);
             action();
             sw.Stop();
-            step.Status = FlowStepStatus.Success;
+            step.Status = StepStatus.Success;
             step.ElapsedMs = sw.ElapsedMilliseconds;
-            AddStep(step);
-            _logger.LogTrace("  [{FlowName}] {StepName} ... OK ({Elapsed}ms){Detail}",
-                _flowName, name, sw.ElapsedMilliseconds, detail != null ? $" {detail}" : "");
+            _steps.Add(step);
+            var prefix = GetPrefix();
+            _logger.LogTrace("[FLOW:{FlowName}] {Prefix}[OK] {StepName} ({Elapsed}ms){DetailSuffix}",
+                _flowName, prefix, name, sw.ElapsedMilliseconds, FormatDetail(detail));
         }
         catch (Exception ex)
         {
             sw.Stop();
-            step.Status = FlowStepStatus.Failed;
+            step.Status = StepStatus.Failed;
             step.ElapsedMs = sw.ElapsedMilliseconds;
-            step.Detail = ex.Message;
-            AddStep(step);
-            _logger.LogTrace("  [{FlowName}] {StepName} ... FAILED ({Elapsed}ms): {Error}",
-                _flowName, name, sw.ElapsedMilliseconds, ex.Message);
+            step.ErrorMessage = ex.Message;
+            _steps.Add(step);
+            var prefix = GetPrefix();
+            _logger.LogTrace("[FLOW:{FlowName}] {Prefix}[FAIL] {StepName} ({Elapsed}ms) - {Error}",
+                _flowName, prefix, name, sw.ElapsedMilliseconds, ex.Message);
             throw;
         }
-        return this;
     }
 
-    /// <summary>Record an async step that executes and times it.</summary>
-    public async Task<FlowLogger> StepAsync(string name, Func<Task> action, string detail = null)
+    public async Task StepAsync(string name, Func<Task> action, string detail = null)
     {
         var sw = Stopwatch.StartNew();
         var step = new FlowStep { Name = name, Detail = detail };
         try
         {
-            _logger.LogTrace("  [{FlowName}] {StepName} ...", _flowName, name);
             await action();
             sw.Stop();
-            step.Status = FlowStepStatus.Success;
+            step.Status = StepStatus.Success;
             step.ElapsedMs = sw.ElapsedMilliseconds;
-            AddStep(step);
-            _logger.LogTrace("  [{FlowName}] {StepName} ... OK ({Elapsed}ms){Detail}",
-                _flowName, name, sw.ElapsedMilliseconds, detail != null ? $" {detail}" : "");
+            _steps.Add(step);
+            var prefix = GetPrefix();
+            _logger.LogTrace("[FLOW:{FlowName}] {Prefix}[OK] {StepName} ({Elapsed}ms){DetailSuffix}",
+                _flowName, prefix, name, sw.ElapsedMilliseconds, FormatDetail(detail));
         }
         catch (Exception ex)
         {
             sw.Stop();
-            step.Status = FlowStepStatus.Failed;
+            step.Status = StepStatus.Failed;
             step.ElapsedMs = sw.ElapsedMilliseconds;
-            step.Detail = ex.Message;
-            AddStep(step);
-            _logger.LogTrace("  [{FlowName}] {StepName} ... FAILED ({Elapsed}ms): {Error}",
-                _flowName, name, sw.ElapsedMilliseconds, ex.Message);
+            step.ErrorMessage = ex.Message;
+            _steps.Add(step);
+            var prefix = GetPrefix();
+            _logger.LogTrace("[FLOW:{FlowName}] {Prefix}[FAIL] {StepName} ({Elapsed}ms) - {Error}",
+                _flowName, prefix, name, sw.ElapsedMilliseconds, ex.Message);
             throw;
         }
-        return this;
     }
 
-    /// <summary>Record a failed step without throwing.</summary>
-    public FlowLogger Fail(string name, string reason = null)
+    public async Task<T> StepAsync<T>(string name, Func<Task<T>> action, string detail = null)
     {
-        var step = new FlowStep { Name = name, Status = FlowStepStatus.Failed, Detail = reason };
-        AddStep(step);
-        _logger.LogTrace("  [{FlowName}] {StepName} ... FAILED{Reason}",
-            _flowName, name, reason != null ? $": {reason}" : "");
-        return this;
-    }
-
-    /// <summary>Record a skipped step.</summary>
-    public FlowLogger Skip(string name, string reason = null)
-    {
-        var step = new FlowStep { Name = name, Status = FlowStepStatus.Skipped, Detail = reason };
-        AddStep(step);
-        _logger.LogTrace("  [{FlowName}] {StepName} ... SKIPPED{Reason}",
-            _flowName, name, reason != null ? $": {reason}" : "");
-        return this;
-    }
-
-    /// <summary>Start a branch (group of child steps).</summary>
-    public FlowLogger Branch(string name)
-    {
-        var step = new FlowStep { Name = name, Status = FlowStepStatus.InProgress };
-        AddStep(step);
-        _currentParent = step;
-        _logger.LogTrace("  [{FlowName}] >> Branch: {BranchName}", _flowName, name);
-        return this;
-    }
-
-    /// <summary>End the current branch.</summary>
-    public FlowLogger EndBranch()
-    {
-        _currentParent = null;
-        return this;
-    }
-
-    private void AddStep(FlowStep step)
-    {
-        if (_currentParent != null)
-            _currentParent.Children.Add(step);
-        else
-            _steps.Add(step);
-    }
-
-    /// <summary>Render the visual flow diagram to Trace log.</summary>
-    private string RenderFlow()
-    {
-        var sb = new StringBuilder();
-        sb.AppendLine();
-        sb.AppendLine($"  ===== FLOW: {_flowName} ({_totalTimer.ElapsedMilliseconds}ms total) =====");
-        sb.AppendLine();
-
-        for (var i = 0; i < _steps.Count; i++)
+        var sw = Stopwatch.StartNew();
+        var step = new FlowStep { Name = name, Detail = detail };
+        try
         {
-            var step = _steps[i];
-            var icon = GetStatusIcon(step.Status);
-            var elapsed = step.ElapsedMs > 0 ? $" ({step.ElapsedMs}ms)" : "";
-            var detail = !string.IsNullOrEmpty(step.Detail) ? $" [{step.Detail}]" : "";
-
-            sb.AppendLine($"    {icon} {step.Name}{elapsed}{detail}");
-
-            // Render children (branch)
-            if (step.Children.Count > 0)
-            {
-                for (var j = 0; j < step.Children.Count; j++)
-                {
-                    var child = step.Children[j];
-                    var childIcon = GetStatusIcon(child.Status);
-                    var childElapsed = child.ElapsedMs > 0 ? $" ({child.ElapsedMs}ms)" : "";
-                    var childDetail = !string.IsNullOrEmpty(child.Detail) ? $" [{child.Detail}]" : "";
-                    var connector = j < step.Children.Count - 1 ? "|   " : "    ";
-                    sb.AppendLine($"    |");
-                    sb.AppendLine($"    +-- {childIcon} {child.Name}{childElapsed}{childDetail}");
-                }
-            }
-
-            // Connector between top-level steps
-            if (i < _steps.Count - 1)
-            {
-                sb.AppendLine("    |");
-                sb.AppendLine("    v");
-            }
+            var result = await action();
+            sw.Stop();
+            step.Status = StepStatus.Success;
+            step.ElapsedMs = sw.ElapsedMilliseconds;
+            _steps.Add(step);
+            var prefix = GetPrefix();
+            _logger.LogTrace("[FLOW:{FlowName}] {Prefix}[OK] {StepName} ({Elapsed}ms){DetailSuffix}",
+                _flowName, prefix, name, sw.ElapsedMilliseconds, FormatDetail(detail));
+            return result;
         }
+        catch (Exception ex)
+        {
+            sw.Stop();
+            step.Status = StepStatus.Failed;
+            step.ElapsedMs = sw.ElapsedMilliseconds;
+            step.ErrorMessage = ex.Message;
+            _steps.Add(step);
+            var prefix = GetPrefix();
+            _logger.LogTrace("[FLOW:{FlowName}] {Prefix}[FAIL] {StepName} ({Elapsed}ms) - {Error}",
+                _flowName, prefix, name, sw.ElapsedMilliseconds, ex.Message);
+            throw;
+        }
+    }
 
-        sb.AppendLine();
+    public T Step<T>(string name, Func<T> action, string detail = null)
+    {
+        var sw = Stopwatch.StartNew();
+        var step = new FlowStep { Name = name, Detail = detail };
+        try
+        {
+            var result = action();
+            sw.Stop();
+            step.Status = StepStatus.Success;
+            step.ElapsedMs = sw.ElapsedMilliseconds;
+            _steps.Add(step);
+            var prefix = GetPrefix();
+            _logger.LogTrace("[FLOW:{FlowName}] {Prefix}[OK] {StepName} ({Elapsed}ms){DetailSuffix}",
+                _flowName, prefix, name, sw.ElapsedMilliseconds, FormatDetail(detail));
+            return result;
+        }
+        catch (Exception ex)
+        {
+            sw.Stop();
+            step.Status = StepStatus.Failed;
+            step.ElapsedMs = sw.ElapsedMilliseconds;
+            step.ErrorMessage = ex.Message;
+            _steps.Add(step);
+            var prefix = GetPrefix();
+            _logger.LogTrace("[FLOW:{FlowName}] {Prefix}[FAIL] {StepName} ({Elapsed}ms) - {Error}",
+                _flowName, prefix, name, sw.ElapsedMilliseconds, ex.Message);
+            throw;
+        }
+    }
 
-        // Final status line
-        var finalStatus = _steps.Count > 0 && _steps.Last().Status == FlowStepStatus.Failed
-            ? "FAILED" : _steps.Any(s => s.Status == FlowStepStatus.Failed) ? "PARTIAL FAILURE" : "SUCCESS";
-        sb.AppendLine($"  ===== FLOW RESULT: {finalStatus} =====");
+    public void Fail(string name, string reason)
+    {
+        var step = new FlowStep { Name = name, Status = StepStatus.Failed, ErrorMessage = reason };
+        _steps.Add(step);
+        var prefix = GetPrefix();
+        _logger.LogTrace("[FLOW:{FlowName}] {Prefix}[FAIL] {StepName} - {Reason}", _flowName, prefix, name, reason);
+    }
+
+    public void Skip(string name, string reason)
+    {
+        var step = new FlowStep { Name = name, Status = StepStatus.Skipped, Detail = reason };
+        _steps.Add(step);
+        var prefix = GetPrefix();
+        _logger.LogTrace("[FLOW:{FlowName}] {Prefix}[SKIP] {StepName} - {Reason}", _flowName, prefix, name, reason);
+    }
+
+    public void Branch(string name)
+    {
+        _branchStack.Push(name);
+        var prefix = GetPrefix();
+        _logger.LogTrace("[FLOW:{FlowName}] {Prefix}>> {BranchName}", _flowName, prefix, name);
+    }
+
+    public void EndBranch()
+    {
+        if (_branchStack.Count > 0)
+        {
+            var name = _branchStack.Pop();
+            var prefix = GetPrefix();
+            _logger.LogTrace("[FLOW:{FlowName}] {Prefix}<< {BranchName}", _flowName, prefix, name);
+        }
+    }
+
+    public bool HasFailures => _steps.Any(s => s.Status == StepStatus.Failed);
+
+    public string GetSummary()
+    {
+        var hasFailures = HasFailures;
+        var overallStatus = hasFailures ? "FAILED" : "OK";
+        var total = _steps.Count;
+        var succeeded = _steps.Count(s => s.Status == StepStatus.Success);
+        var failed = _steps.Count(s => s.Status == StepStatus.Failed);
+        var skipped = _steps.Count(s => s.Status == StepStatus.Skipped);
+        var elapsed = _overallStopwatch.ElapsedMilliseconds;
+
+        var sb = new StringBuilder();
+        sb.AppendLine($"Flow: {_flowName}  [{overallStatus}]  Total: {elapsed}ms");
+        sb.AppendLine($"Steps: {total} total, {succeeded} ok, {failed} failed, {skipped} skipped");
+        sb.AppendLine("----------------------------------------");
+        foreach (var step in _steps)
+        {
+            var icon = step.Status == StepStatus.Success ? "[OK]  "
+                : step.Status == StepStatus.Failed ? "[FAIL]"
+                : step.Status == StepStatus.Skipped ? "[SKIP]"
+                : "[...]";
+            var time = step.ElapsedMs.HasValue ? $" ({step.ElapsedMs}ms)" : "";
+            var detail = !string.IsNullOrEmpty(step.ErrorMessage)
+                ? $" - {step.ErrorMessage}"
+                : !string.IsNullOrEmpty(step.Detail)
+                    ? $" - {step.Detail}"
+                    : "";
+            sb.AppendLine($"  {icon} {step.Name}{time}{detail}");
+        }
+        sb.Append("----------------------------------------");
 
         return sb.ToString();
     }
 
-    private static string GetStatusIcon(FlowStepStatus status)
+    /// <summary>
+    ///     Same information as <see cref="GetSummary" />, but as one entry per step instead of a
+    ///     single multi-line block. Intended for callers (e.g. EnrollmentResult.EnrollmentContext)
+    ///     whose rendering surface displays a dictionary as a bulleted list and doesn't respect
+    ///     embedded newlines - each step becomes its own bullet instead of one run-on line.
+    /// </summary>
+    public Dictionary<string, string> GetSummaryEntries()
     {
-        return status switch
+        var overallStatus = HasFailures ? "FAILED" : "OK";
+        var succeeded = _steps.Count(s => s.Status == StepStatus.Success);
+        var failed = _steps.Count(s => s.Status == StepStatus.Failed);
+        var skipped = _steps.Count(s => s.Status == StepStatus.Skipped);
+
+        var entries = new Dictionary<string, string>
         {
-            FlowStepStatus.Success => "[OK]",
-            FlowStepStatus.Failed => "[FAIL]",
-            FlowStepStatus.Skipped => "[SKIP]",
-            FlowStepStatus.InProgress => "[...]",
-            _ => "[?]"
+            [$"Flow: {_flowName}"] =
+                $"[{overallStatus}] {_overallStopwatch.ElapsedMilliseconds}ms total - " +
+                $"{_steps.Count} steps ({succeeded} ok, {failed} failed, {skipped} skipped)"
         };
+
+        for (var i = 0; i < _steps.Count; i++)
+        {
+            var step = _steps[i];
+            var icon = step.Status == StepStatus.Success ? "OK"
+                : step.Status == StepStatus.Failed ? "FAIL"
+                : step.Status == StepStatus.Skipped ? "SKIP"
+                : "...";
+            var time = step.ElapsedMs.HasValue ? $" ({step.ElapsedMs}ms)" : "";
+            var detail = !string.IsNullOrEmpty(step.ErrorMessage) ? step.ErrorMessage
+                : !string.IsNullOrEmpty(step.Detail) ? step.Detail
+                : null;
+
+            entries[$"Flow Step {i + 1:00}: {step.Name}"] =
+                detail == null ? $"[{icon}]{time}" : $"[{icon}]{time} - {detail}";
+        }
+
+        return entries;
     }
 
     public void Dispose()
     {
-        if (_disposed) return;
-        _disposed = true;
-        _totalTimer.Stop();
-        _logger.LogTrace(RenderFlow());
+        _overallStopwatch.Stop();
+        var summary = GetSummary();
+        _logger.LogTrace("[FLOW:{FlowName}] === END ===\n{Summary}", _flowName, summary);
+    }
+
+    private string GetPrefix()
+    {
+        if (_branchStack.Count == 0) return "";
+        return new string(' ', _branchStack.Count * 2) + "| ";
+    }
+
+    private static string FormatDetail(string detail)
+    {
+        return string.IsNullOrEmpty(detail) ? "" : $" - {detail}";
+    }
+
+    private enum StepStatus
+    {
+        Success,
+        Failed,
+        Skipped,
+        InProgress
+    }
+
+    private class FlowStep
+    {
+        public string Name { get; set; }
+        public string Detail { get; set; }
+        public StepStatus Status { get; set; } = StepStatus.InProgress;
+        public long? ElapsedMs { get; set; }
+        public string ErrorMessage { get; set; }
     }
 }
