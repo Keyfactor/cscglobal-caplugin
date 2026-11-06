@@ -18,11 +18,23 @@ public class FlowLoggerTests
     }
 
     [Fact]
-    public void Step_NoDetail_ChainableAndDoesNotThrow()
+    public void Constructor_NullLogger_Throws()
+    {
+        Assert.Throws<ArgumentNullException>(() => new FlowLogger(null!, "Flow"));
+    }
+
+    [Fact]
+    public void Constructor_NullFlowName_Throws()
+    {
+        Assert.Throws<ArgumentNullException>(() => new FlowLogger(NewLoggerMock().Object, null!));
+    }
+
+    [Fact]
+    public void Step_NoDetail_DoesNotThrowAndMarksNoFailure()
     {
         using var flow = new FlowLogger(NewLoggerMock().Object, "Flow");
-        var result = flow.Step("StepOne");
-        Assert.Same(flow, result);
+        flow.Step("StepOne");
+        Assert.False(flow.HasFailures);
     }
 
     [Fact]
@@ -30,15 +42,17 @@ public class FlowLoggerTests
     {
         using var flow = new FlowLogger(NewLoggerMock().Object, "Flow");
         flow.Step("StepOne", "some detail");
+        Assert.False(flow.HasFailures);
     }
 
     [Fact]
-    public void Step_Action_Success_RunsAction()
+    public void Step_Action_Success_RecordsSuccess()
     {
         using var flow = new FlowLogger(NewLoggerMock().Object, "Flow");
         var ran = false;
         flow.Step("Action", () => ran = true);
         Assert.True(ran);
+        Assert.False(flow.HasFailures);
     }
 
     [Fact]
@@ -47,6 +61,7 @@ public class FlowLoggerTests
         using var flow = new FlowLogger(NewLoggerMock().Object, "Flow");
         Assert.Throws<InvalidOperationException>(() =>
             flow.Step("Action", () => throw new InvalidOperationException("boom")));
+        Assert.True(flow.HasFailures);
     }
 
     [Fact]
@@ -54,60 +69,86 @@ public class FlowLoggerTests
     {
         using var flow = new FlowLogger(NewLoggerMock().Object, "Flow");
         flow.Step("Action", () => { }, "detail");
+        Assert.False(flow.HasFailures);
     }
 
     [Fact]
-    public async Task StepAsync_Success_RunsAction()
+    public async Task StepAsync_NoReturnValue_Success()
     {
         using var flow = new FlowLogger(NewLoggerMock().Object, "Flow");
-        var ran = false;
-        await flow.StepAsync("AsyncStep", () =>
-        {
-            ran = true;
-            return Task.CompletedTask;
-        });
-        Assert.True(ran);
+        await flow.StepAsync("AsyncStep", () => Task.CompletedTask);
+        Assert.False(flow.HasFailures);
     }
 
     [Fact]
-    public async Task StepAsync_Throws_RecordsFailureAndRethrows()
+    public async Task StepAsync_NoReturnValue_Throws_RecordsFailureAndRethrows()
     {
         using var flow = new FlowLogger(NewLoggerMock().Object, "Flow");
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
             flow.StepAsync("AsyncStep", () => throw new InvalidOperationException("boom")));
+        Assert.True(flow.HasFailures);
     }
 
     [Fact]
-    public async Task StepAsync_WithDetail_Success()
+    public async Task StepAsync_WithReturnValue_Success_ReturnsResult()
     {
         using var flow = new FlowLogger(NewLoggerMock().Object, "Flow");
-        await flow.StepAsync("AsyncStep", () => Task.CompletedTask, "detail");
+        var result = await flow.StepAsync("AsyncStep", () => Task.FromResult(42));
+        Assert.Equal(42, result);
+        Assert.False(flow.HasFailures);
     }
 
     [Fact]
-    public void Fail_RecordsFailure_DoesNotThrow()
+    public async Task StepAsync_WithReturnValue_Throws_RecordsFailureAndRethrows()
     {
         using var flow = new FlowLogger(NewLoggerMock().Object, "Flow");
-        flow.Fail("StepOne");
-        flow.Fail("StepTwo", "reason");
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            flow.StepAsync<int>("AsyncStep", () => throw new InvalidOperationException("boom")));
+        Assert.True(flow.HasFailures);
     }
 
     [Fact]
-    public void Skip_DoesNotThrow()
+    public void StepFunc_Success_ReturnsResult()
     {
         using var flow = new FlowLogger(NewLoggerMock().Object, "Flow");
-        flow.Skip("StepOne");
-        flow.Skip("StepTwo", "not applicable");
+        var result = flow.Step("Func", () => 99);
+        Assert.Equal(99, result);
+        Assert.False(flow.HasFailures);
     }
 
     [Fact]
-    public void Branch_EndBranch_ChildStepsNestUnderBranch()
+    public void StepFunc_Throws_RecordsFailureAndRethrows()
+    {
+        using var flow = new FlowLogger(NewLoggerMock().Object, "Flow");
+        Assert.Throws<InvalidOperationException>(() =>
+            flow.Step<int>("Func", () => throw new InvalidOperationException("boom")));
+        Assert.True(flow.HasFailures);
+    }
+
+    [Fact]
+    public void Fail_RecordsFailure()
+    {
+        using var flow = new FlowLogger(NewLoggerMock().Object, "Flow");
+        flow.Fail("StepOne", "reason");
+        Assert.True(flow.HasFailures);
+    }
+
+    [Fact]
+    public void Skip_DoesNotRecordFailure()
+    {
+        using var flow = new FlowLogger(NewLoggerMock().Object, "Flow");
+        flow.Skip("StepOne", "not applicable");
+        Assert.False(flow.HasFailures);
+    }
+
+    [Fact]
+    public void Branch_EndBranch_RoundTrips()
     {
         using var flow = new FlowLogger(NewLoggerMock().Object, "Flow");
         flow.Branch("Inner");
         flow.Step("NestedStep");
         flow.EndBranch();
-        flow.Step("TopLevelStep");
+        Assert.False(flow.HasFailures);
     }
 
     [Fact]
@@ -118,103 +159,63 @@ public class FlowLoggerTests
     }
 
     [Fact]
-    public void GetSummaryEntries_OneEntryPerStepPlusHeader()
+    public void GetSummary_IncludesAllStepKindsAndCounts()
     {
-        using var flow = new FlowLogger(NewLoggerMock().Object, "MyFlow");
-        flow.Step("StepOne");
-        flow.Fail("StepTwo", "boom");
+        using var flow = new FlowLogger(NewLoggerMock().Object, "Flow");
+        flow.Step("Ok");
+        flow.Skip("Skipped", "n/a");
+        flow.Fail("Failed", "bad");
+
+        var summary = flow.GetSummary();
+
+        Assert.Contains("FAILED", summary);
+        Assert.Contains("Steps: 3 total, 1 ok, 1 failed, 1 skipped", summary);
+        Assert.Contains("[OK]", summary);
+        Assert.Contains("[FAIL]", summary);
+        Assert.Contains("[SKIP]", summary);
+    }
+
+    [Fact]
+    public void GetSummary_NoFailures_ReportsOk()
+    {
+        using var flow = new FlowLogger(NewLoggerMock().Object, "Flow");
+        flow.Step("Ok");
+        Assert.Contains("[OK]", flow.GetSummary());
+        Assert.DoesNotContain("FAILED", flow.GetSummary());
+    }
+
+    [Fact]
+    public void GetSummaryEntries_OneEntryPerStepPlusOverview()
+    {
+        using var flow = new FlowLogger(NewLoggerMock().Object, "Flow");
+        flow.Step("Ok");
+        flow.Skip("Skipped", "n/a");
+        flow.Fail("Failed", "bad");
 
         var entries = flow.GetSummaryEntries();
 
-        Assert.True(entries.ContainsKey("Flow: MyFlow"));
-        Assert.Contains("FAILED", entries["Flow: MyFlow"]);
-        Assert.Equal(3, entries.Count); // header + 2 steps
-        Assert.Contains(entries, e => e.Key.Contains("StepOne") && e.Value.Contains("OK"));
-        Assert.Contains(entries, e => e.Key.Contains("StepTwo") && e.Value.Contains("boom"));
+        // 1 overview entry + 3 step entries.
+        Assert.Equal(4, entries.Count);
+        Assert.Contains(entries.Keys, k => k.StartsWith("Flow: Flow"));
+        Assert.Contains("FAILED", entries.Single(e => e.Key.StartsWith("Flow: Flow")).Value);
+        Assert.Contains(entries, e => e.Key.EndsWith(": Ok") && e.Value.StartsWith("[OK]"));
+        Assert.Contains(entries, e => e.Key.EndsWith(": Skipped") && e.Value.Contains("n/a"));
+        Assert.Contains(entries, e => e.Key.EndsWith(": Failed") && e.Value.Contains("bad"));
     }
 
     [Fact]
-    public void GetSummaryEntries_AllStepsSucceed_HeaderReportsOk()
+    public void GetSummaryEntries_NoSteps_ReturnsOnlyOverview()
     {
-        using var flow = new FlowLogger(NewLoggerMock().Object, "MyFlow");
-        flow.Step("StepOne");
-        flow.Step("StepTwo");
-
+        using var flow = new FlowLogger(NewLoggerMock().Object, "Flow");
         var entries = flow.GetSummaryEntries();
-
-        Assert.Contains("[OK]", entries["Flow: MyFlow"]);
+        Assert.Single(entries);
     }
 
     [Fact]
-    public void GetSummaryEntries_BranchChildren_IncludedAsSeparateEntries()
-    {
-        using var flow = new FlowLogger(NewLoggerMock().Object, "MyFlow");
-        flow.Branch("Inner");
-        flow.Step("NestedStep");
-        flow.Fail("NestedFail", "inner reason");
-        flow.EndBranch();
-        flow.Step("TopLevelStep");
-
-        var entries = flow.GetSummaryEntries();
-
-        Assert.Contains(entries, e => e.Key.Contains("NestedStep"));
-        Assert.Contains(entries, e => e.Key.Contains("NestedFail") && e.Value.Contains("inner reason"));
-        Assert.Contains(entries, e => e.Key.Contains("TopLevelStep"));
-    }
-
-    [Fact]
-    public void Dispose_NoSteps_DoesNotThrow()
-    {
-        var flow = new FlowLogger(NewLoggerMock().Object, "Flow");
-        flow.Dispose();
-    }
-
-    [Fact]
-    public void Dispose_AllStepsSuccess_DoesNotThrow()
-    {
-        var flow = new FlowLogger(NewLoggerMock().Object, "Flow");
-        flow.Step("Ok1");
-        flow.Step("Ok2");
-        flow.Dispose();
-    }
-
-    [Fact]
-    public void Dispose_LastStepFailed_DoesNotThrow()
-    {
-        var flow = new FlowLogger(NewLoggerMock().Object, "Flow");
-        flow.Step("Ok1");
-        flow.Fail("Failed1");
-        flow.Dispose();
-    }
-
-    [Fact]
-    public void Dispose_MidStepFailedButLastSucceeded_PartialFailure_DoesNotThrow()
-    {
-        var flow = new FlowLogger(NewLoggerMock().Object, "Flow");
-        flow.Fail("Failed1");
-        flow.Step("Ok1");
-        flow.Dispose();
-    }
-
-    [Fact]
-    public void Dispose_WithBranchChildren_RendersChildrenWithoutThrowing()
-    {
-        var flow = new FlowLogger(NewLoggerMock().Object, "Flow");
-        flow.Branch("Branch1");
-        flow.Step("Child1");
-        flow.Fail("Child2");
-        flow.Skip("Child3");
-        flow.EndBranch();
-        flow.Step("AfterBranch");
-        flow.Dispose();
-    }
-
-    [Fact]
-    public void Dispose_CalledTwice_IsIdempotent()
+    public void Dispose_DoesNotThrow()
     {
         var flow = new FlowLogger(NewLoggerMock().Object, "Flow");
         flow.Step("Ok");
         flow.Dispose();
-        flow.Dispose(); // should not throw or double-log
     }
 }

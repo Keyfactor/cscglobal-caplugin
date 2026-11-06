@@ -2,13 +2,13 @@
     "$schema": "https://keyfactor.github.io/integration-manifest-schema.json",
     "integration_type": "anyca-plugin",
     "name": "CSCGlobal CAPlugin REST Gateway Plugin",
-    "status": "production",
     "support_level": "kf-supported",
+    "status": "pilot",
     "link_github": true,
     "status": "production",
     "update_catalog": true,
     "description": "CSCGlobal CAPlugin for the AnyCA REST Gateway framework",
-    "gateway_framework": "26.2.0",
+    "gateway_framework": "24.2.0",
     "release_project": "cscglobal-caplugin/CSCGlobalCAPlugin.csproj",
     "release_dir": "cscglobal-caplugin/bin/Release",
     "about": {
@@ -33,14 +33,6 @@
                 {
                     "name": "SyncFilterDays",
                     "description": "Number of days from today to filter certificates by expiration date during incremental sync."
-                },
-                {
-                    "name": "RenewalWindowDays",
-                    "description": "Number of days before the annual order expiry within which a RenewOrReissue triggers a paid Renewal rather than a free Reissue. Default is 30."
-                },
-                {
-                    "name": "DcvPollTimeoutSeconds",
-                    "description": "Max seconds to synchronously poll CSC for issuance after submitting an order (and publishing CNAME DCV). 0 disables polling (enrollment returns pending immediately; cert arrives on next sync). When >0, fast-validating orders can return the cert directly. Keep small to avoid long-blocking enrollment requests."
                 }
             ],
             "enrollment_config": [
