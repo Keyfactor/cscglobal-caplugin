@@ -124,6 +124,42 @@ public sealed class FlowLogger : IDisposable
         return this;
     }
 
+    /// <summary>
+    ///     Record an async step whose own return value becomes the step's detail - unlike the
+    ///     <paramref name="detail" /> parameter on the other overload (which is evaluated before
+    ///     the action runs and so can't reflect anything the action decided), this reflects what
+    ///     actually happened during execution (e.g. why a conditional step was a no-op).
+    /// </summary>
+    public async Task<FlowLogger> StepAsync(string name, Func<Task<string>> action)
+    {
+        var sw = Stopwatch.StartNew();
+        var step = new FlowStep { Name = name };
+        try
+        {
+            _logger.LogTrace("  [{FlowName}] {StepName} ...", _flowName, name);
+            var detail = await action();
+            sw.Stop();
+            step.Status = FlowStepStatus.Success;
+            step.ElapsedMs = sw.ElapsedMilliseconds;
+            step.Detail = detail;
+            AddStep(step);
+            _logger.LogTrace("  [{FlowName}] {StepName} ... OK ({Elapsed}ms){Detail}",
+                _flowName, name, sw.ElapsedMilliseconds, detail != null ? $" {detail}" : "");
+        }
+        catch (Exception ex)
+        {
+            sw.Stop();
+            step.Status = FlowStepStatus.Failed;
+            step.ElapsedMs = sw.ElapsedMilliseconds;
+            step.Detail = ex.Message;
+            AddStep(step);
+            _logger.LogTrace("  [{FlowName}] {StepName} ... FAILED ({Elapsed}ms): {Error}",
+                _flowName, name, sw.ElapsedMilliseconds, ex.Message);
+            throw;
+        }
+        return this;
+    }
+
     /// <summary>Record a failed step without throwing.</summary>
     public FlowLogger Fail(string name, string reason = null)
     {
@@ -217,6 +253,86 @@ public sealed class FlowLogger : IDisposable
         sb.AppendLine($"  ===== FLOW RESULT: {finalStatus} =====");
 
         return sb.ToString();
+    }
+
+    /// <summary>
+    ///     Concise step-by-step summary suitable for surfacing in a user-facing failure message
+    ///     (unlike <see cref="RenderFlow" />'s ASCII-art tree, which is meant for Trace logs only).
+    /// </summary>
+    public string GetSummary()
+    {
+        var hasFailures = _steps.Any(s => s.Status == FlowStepStatus.Failed) ||
+            _steps.SelectMany(s => s.Children).Any(c => c.Status == FlowStepStatus.Failed);
+        var overallStatus = hasFailures ? "FAILED" : "OK";
+
+        var sb = new StringBuilder();
+        sb.AppendLine($"Flow: {_flowName}  [{overallStatus}]  Total: {_totalTimer.ElapsedMilliseconds}ms");
+        sb.AppendLine("----------------------------------------");
+
+        foreach (var step in _steps)
+        {
+            AppendSummaryLine(sb, step, 0);
+            foreach (var child in step.Children)
+                AppendSummaryLine(sb, child, 1);
+        }
+
+        return sb.ToString();
+    }
+
+    private static void AppendSummaryLine(StringBuilder sb, FlowStep step, int indentLevel)
+    {
+        var indent = new string(' ', indentLevel * 2);
+        var icon = GetStatusIcon(step.Status);
+        var elapsed = step.ElapsedMs > 0 ? $" ({step.ElapsedMs}ms)" : "";
+        var detail = !string.IsNullOrEmpty(step.Detail) ? $" - {step.Detail}" : "";
+        sb.AppendLine($"{indent}{icon} {step.Name}{elapsed}{detail}");
+    }
+
+    /// <summary>
+    ///     Same information as <see cref="GetSummary" />, but as one entry per step instead of a
+    ///     single multi-line block. Intended for callers (e.g. EnrollmentResult.EnrollmentContext)
+    ///     whose rendering surface displays a dictionary as a bulleted list and doesn't respect
+    ///     embedded newlines - each step becomes its own bullet instead of one run-on line.
+    /// </summary>
+    public Dictionary<string, string> GetSummaryEntries()
+    {
+        var allSteps = _steps.Concat(_steps.SelectMany(s => s.Children)).ToList();
+        var hasFailures = allSteps.Any(s => s.Status == FlowStepStatus.Failed);
+        var overallStatus = hasFailures ? "FAILED" : "OK";
+        var succeeded = allSteps.Count(s => s.Status == FlowStepStatus.Success);
+        var failed = allSteps.Count(s => s.Status == FlowStepStatus.Failed);
+        var skipped = allSteps.Count(s => s.Status == FlowStepStatus.Skipped);
+
+        var entries = new Dictionary<string, string>
+        {
+            [$"Flow: {_flowName}"] =
+                $"[{overallStatus}] {_totalTimer.ElapsedMilliseconds}ms total - " +
+                $"{allSteps.Count} steps ({succeeded} ok, {failed} failed, {skipped} skipped)"
+        };
+
+        var stepNumber = 0;
+        foreach (var step in _steps)
+        {
+            stepNumber++;
+            AddSummaryEntry(entries, step, stepNumber, false);
+
+            foreach (var child in step.Children)
+            {
+                stepNumber++;
+                AddSummaryEntry(entries, child, stepNumber, true);
+            }
+        }
+
+        return entries;
+    }
+
+    private static void AddSummaryEntry(Dictionary<string, string> entries, FlowStep step, int stepNumber, bool indent)
+    {
+        var icon = GetStatusIcon(step.Status);
+        var time = step.ElapsedMs > 0 ? $" ({step.ElapsedMs}ms)" : "";
+        var detail = !string.IsNullOrEmpty(step.Detail) ? $" - {step.Detail}" : "";
+        var prefix = indent ? "  " : "";
+        entries[$"Flow Step {stepNumber:00}: {prefix}{step.Name}"] = $"{icon}{time}{detail}";
     }
 
     private static string GetStatusIcon(FlowStepStatus status)

@@ -758,10 +758,19 @@ public class CSCGlobalCAPluginTests
     }
 
     [Fact]
-    public void GetProductIds_ReturnsCanonicalTenProducts()
+    public void GetProductIds_ReturnsCanonicalAndLegacyNames()
     {
         var plugin = MakePlugin();
-        Assert.Equal(10, plugin.GetProductIds().Count);
+        var ids = plugin.GetProductIds();
+
+        // Command uses this list to auto-resolve a CA for a template when none is explicitly
+        // selected, so pre-1.2.0 legacy-named templates need their names advertised here too,
+        // not just the 10 canonical names.
+        Assert.Equal(17, ids.Count);
+        Assert.Contains("CSC TrustedSecure OV", ids);
+        Assert.Contains("CSC TrustedSecure DV Wildcard, Multiple Names", ids);
+        Assert.Contains("CSC TrustedSecure EV Certificate", ids);
+        Assert.Contains("CSC TrustedSecure Domain Validated SSL", ids);
     }
 
     // ---------------------------------------------------------------------
