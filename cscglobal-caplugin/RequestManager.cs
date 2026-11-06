@@ -329,37 +329,6 @@ public class RequestManager
             productId = canonicalProductId;
         }
 
-        switch (productId)
-        {
-            case "CSC TrustedSecure OV":
-                return "0";
-            case "CSC TrustedSecure OV Wildcard":
-                return "1";
-            case "CSC TrustedSecure OV, Multiple Names":
-                return "2";
-            case "CSC TrustedSecure EV":
-                return "3";
-            case "CSC TrustedSecure DV":
-                return "4";
-            case "CSC TrustedSecure DV Wildcard":
-                return "5";
-            case "CSC TrustedSecure DV, Multiple Names":
-                return "6";
-            case "CSC TrustedSecure EV, Multiple Names":
-                return "7";
-            case "CSC TrustedSecure OV Wildcard, Multiple Names":
-                return "8";
-            case "CSC TrustedSecure DV Wildcard, Multiple Names":
-                return "9";
-        }
-
-        Logger.LogWarning($"Unrecognized product ID '{productId}'; defaulting certificate type to -1");
-        return "-1";
-    }
-
-    private static readonly HashSet<string> MultiNameCertificateTypes = new() { "2", "6", "7", "8", "9" };
-    private static readonly HashSet<string> EvCertificateTypes = new() { "3", "7" };
-
     public Notifications GetNotifications(EnrollmentProductInfo productInfo)
     {
         var notificationEmails = GetOptionalParam(productInfo, "Notification Email(s) Comma Separated");

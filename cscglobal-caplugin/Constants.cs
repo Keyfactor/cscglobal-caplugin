@@ -44,8 +44,8 @@ public class ProductIDs
             ["CSC TrustedSecure UC Certificate"] = "CSC TrustedSecure OV, Multiple Names",
             ["CSC TrustedSecure EV Certificate"] = "CSC TrustedSecure EV",
             ["CSC TrustedSecure Domain Validated SSL"] = "CSC TrustedSecure DV",
-            ["CSC TrustedSecure Domain Validated Wildcard SSL"] = "CSC TrustedSecure DV Wildcard",
-            ["CSC TrustedSecure Domain Validated UC Certificate"] = "CSC TrustedSecure DV, Multiple Names"
+            ["CSC Trusted Secure Domain Validated Wildcard SSL"] = "CSC TrustedSecure DV Wildcard",
+            ["CSC Trusted Secure Domain Validated UC Certificate"] = "CSC TrustedSecure DV, Multiple Names"
         };
 }
 

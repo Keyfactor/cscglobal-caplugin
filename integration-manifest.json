@@ -5,6 +5,7 @@
     "support_level": "kf-supported",
     "status": "pilot",
     "link_github": true,
+    "status": "production",
     "update_catalog": true,
     "description": "CSCGlobal CAPlugin for the AnyCA REST Gateway framework",
     "gateway_framework": "24.2.0",
@@ -94,7 +95,14 @@
                 "CSC TrustedSecure DV, Multiple Names",
                 "CSC TrustedSecure EV, Multiple Names",
                 "CSC TrustedSecure OV Wildcard, Multiple Names",
-                "CSC TrustedSecure DV Wildcard, Multiple Names"
+                "CSC TrustedSecure DV Wildcard, Multiple Names",
+                "CSC TrustedSecure Premium Certificate",
+                "CSC TrustedSecure EV Certificate",
+                "CSC TrustedSecure UC Certificate",
+                "CSC TrustedSecure Premium Wildcard Certificate",
+                "CSC TrustedSecure Domain Validated SSL",
+                "CSC Trusted Secure Domain Validated Wildcard SSL",
+                "CSC Trusted Secure Domain Validated UC Certificate"
             ]
         }
     }

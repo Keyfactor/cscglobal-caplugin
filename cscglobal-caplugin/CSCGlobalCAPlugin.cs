@@ -845,8 +845,16 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
     //done
     public List<string> GetProductIds()
     {
-
-        return ProductIDs.productIds;
+        // Command uses this list to auto-resolve a CA for a template when none is explicitly
+        // selected (matches a template's product ID against each CA's advertised list). Existing
+        // Certificate Templates created before the 1.2.0 product rename are still configured with
+        // the pre-1.2.0 legacy names, so those must be advertised here too, or auto-resolution
+        // fails for them with "No CA was found to issue the specified template" even though
+        // explicit CA selection still works (that path goes through the more lenient
+        // ValidateProductInfo, which already accepts legacy names via legacyProductIdAliases).
+        return ProductIDs.productIds
+            .Concat(ProductIDs.legacyProductIdAliases.Keys)
+            .ToList();
     }
 
     #region PRIVATE
