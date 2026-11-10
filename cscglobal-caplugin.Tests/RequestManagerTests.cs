@@ -384,8 +384,8 @@ public class RequestManagerTests
     [InlineData("CSC TrustedSecure UC Certificate", "2", true, false)]
     [InlineData("CSC TrustedSecure EV Certificate", "3", false, true)]
     [InlineData("CSC TrustedSecure Domain Validated SSL", "4", false, false)]
-    [InlineData("CSC TrustedSecure Domain Validated Wildcard SSL", "5", false, false)]
-    [InlineData("CSC TrustedSecure Domain Validated UC Certificate", "6", true, false)]
+    [InlineData("CSC Trusted Secure Domain Validated Wildcard SSL", "5", false, false)]
+    [InlineData("CSC Trusted Secure Domain Validated UC Certificate", "6", true, false)]
     public void GetRegistrationRequest_RoutesCertificateTypeAndOptionalSections(
         string productId, string expectedType, bool expectSans, bool expectEv)
     {
@@ -684,7 +684,7 @@ public class RequestManagerTests
         // A Certificate Template in Command created before the 1.2.0 rename still carries the
         // old product name; renewals against it must resolve the same as the canonical name.
         var sans = new Dictionary<string, string[]> { ["dnsname"] = new[] { "www.example.com" } };
-        var productInfo = ProductInfo("CSC TrustedSecure Domain Validated UC Certificate", new Dictionary<string, string>
+        var productInfo = ProductInfo("CSC Trusted Secure Domain Validated UC Certificate", new Dictionary<string, string>
         {
             ["Domain Control Validation Method"] = "CNAME"
         });

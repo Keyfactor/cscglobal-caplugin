@@ -1,0 +1,14 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+	<PropertyGroup>
+		<TargetFramework>net8.0</TargetFramework>
+		<RootNamespace>Keyfactor.Extensions.CAPlugin.CSCGlobal.MockData</RootNamespace>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<Nullable>enable</Nullable>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<ProjectReference Include="..\cscglobal-caplugin\CSCGlobalCAPlugin.csproj" />
+	</ItemGroup>
+
+</Project>

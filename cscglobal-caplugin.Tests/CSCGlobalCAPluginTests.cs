@@ -9,6 +9,7 @@ using Keyfactor.AnyGateway.Extensions;
 using Keyfactor.Extensions.CAPlugin.CSCGlobal;
 using Keyfactor.Extensions.CAPlugin.CSCGlobal.Client.Models;
 using Keyfactor.Extensions.CAPlugin.CSCGlobal.Interfaces;
+using Keyfactor.Extensions.CAPlugin.CSCGlobal.MockData;
 using Keyfactor.PKI.Enums.EJBCA;
 using Moq;
 using Xunit;
@@ -429,6 +430,167 @@ public class CSCGlobalCAPluginTests
     }
 
     // ---------------------------------------------------------------------
+    // Synchronize - mid-cycle reissue repro (CSC reissues a cert under the same uuid
+    // partway through its order term, with a key pair Keyfactor never held). The plugin
+    // does not special-case this today; these tests document and pin down that baseline
+    // so a fix can be verified against it later.
+    // ---------------------------------------------------------------------
+
+    [Fact]
+    public async Task Synchronize_MidCycleReissue_SameUuidQueuedTwiceWithDifferentCertificates()
+    {
+        var baseline = MidCycleReissueFixtures.SingleNameBaseline();
+        var reissue = MidCycleReissueFixtures.SingleNameMidCycleReissue();
+
+        var mockClient = new Mock<ICscGlobalClient>();
+        mockClient.Setup(c => c.SubmitCertificateListRequestAsync(null)).ReturnsAsync(new CertificateListResponse
+        {
+            Results = new List<CertificateResponse> { baseline, reissue }
+        });
+
+        var plugin = MakePlugin(mockClient);
+        var buffer = new BlockingCollection<AnyCAPluginCertificate>();
+
+        await plugin.Synchronize(buffer, null, true, CancellationToken.None);
+
+        var items = buffer.ToList();
+
+        // Today: both records are queued independently under the same CARequestID (the shared
+        // uuid), with different certificate content, and nothing reflects that the second one
+        // was a mid-cycle reissue rather than an ordinary sync of the same certificate.
+        Assert.Equal(2, items.Count);
+        Assert.All(items, i => Assert.Equal(baseline.Uuid, i.CARequestID));
+        Assert.NotEqual(items[0].Certificate, items[1].Certificate);
+    }
+
+    [Fact]
+    public async Task Synchronize_MidCycleReissue_WildcardMultiName_SameUuidQueuedTwiceWithDifferentCertificates()
+    {
+        var baseline = MidCycleReissueFixtures.WildcardMultiNameBaseline();
+        var reissue = MidCycleReissueFixtures.WildcardMultiNameMidCycleReissue();
+
+        var mockClient = new Mock<ICscGlobalClient>();
+        mockClient.Setup(c => c.SubmitCertificateListRequestAsync(null)).ReturnsAsync(new CertificateListResponse
+        {
+            Results = new List<CertificateResponse> { baseline, reissue }
+        });
+
+        var plugin = MakePlugin(mockClient);
+        var buffer = new BlockingCollection<AnyCAPluginCertificate>();
+
+        await plugin.Synchronize(buffer, null, true, CancellationToken.None);
+
+        var items = buffer.ToList();
+
+        Assert.Equal(2, items.Count);
+        Assert.All(items, i => Assert.Equal(baseline.Uuid, i.CARequestID));
+        Assert.All(items, i => Assert.Equal("CSC TrustedSecure DV Wildcard, Multiple Names", i.ProductID));
+        Assert.NotEqual(items[0].Certificate, items[1].Certificate);
+    }
+
+    [Fact]
+    public void Initialize_MockReissueRunMissing_DefaultsToFalse()
+    {
+        var plugin = MakePlugin();
+        Assert.False(plugin.MockReissueRun);
+    }
+
+    [Fact]
+    public void Initialize_MockReissueRunTrue_ParsesTrue()
+    {
+        var data = ValidConnectionData();
+        data[Constants.MockReissueRun] = "true";
+        var plugin = MakePlugin(connectionData: data);
+        Assert.True(plugin.MockReissueRun);
+    }
+
+    [Fact]
+    public async Task Synchronize_MockReissueRunEnabled_InjectsSyntheticDuplicateForEachActiveCert()
+    {
+        var (_, pem) = MakeSelfSignedCert();
+        var apiCert = ToApiBase64(pem);
+
+        var mockClient = new Mock<ICscGlobalClient>();
+        mockClient.Setup(c => c.SubmitCertificateListRequestAsync(null)).ReturnsAsync(new CertificateListResponse
+        {
+            Results = new List<CertificateResponse>
+            {
+                new CertificateResponse { Uuid = "real-1", CommonName = "real1.example.com", Status = "ACTIVE", CertificateType = "CSC TrustedSecure DV", Certificate = apiCert },
+                new CertificateResponse { Uuid = "real-2", CommonName = "real2.example.com", Status = "REVOKED", CertificateType = "CSC TrustedSecure DV", Certificate = apiCert }
+            }
+        });
+
+        var data = ValidConnectionData();
+        data[Constants.MockReissueRun] = "true";
+        var plugin = MakePlugin(mockClient, connectionData: data);
+        var buffer = new BlockingCollection<AnyCAPluginCertificate>();
+
+        await plugin.Synchronize(buffer, null, true, CancellationToken.None);
+
+        var items = buffer.ToList();
+
+        // real-1 is ACTIVE -> gets a synthetic reissue duplicate injected. real-2 is REVOKED ->
+        // no injection, since there's nothing to "reissue mid-cycle" for a revoked certificate.
+        Assert.Equal(3, items.Count);
+        var real1Items = items.Where(i => i.CARequestID == "real-1").ToList();
+        Assert.Equal(2, real1Items.Count);
+        Assert.NotEqual(real1Items[0].Certificate, real1Items[1].Certificate);
+        Assert.Single(items, i => i.CARequestID == "real-2");
+    }
+
+    [Fact]
+    public async Task Synchronize_MockReissueRunDisabled_DoesNotInjectDuplicates()
+    {
+        var (_, pem) = MakeSelfSignedCert();
+        var apiCert = ToApiBase64(pem);
+
+        var mockClient = new Mock<ICscGlobalClient>();
+        mockClient.Setup(c => c.SubmitCertificateListRequestAsync(null)).ReturnsAsync(new CertificateListResponse
+        {
+            Results = new List<CertificateResponse>
+            {
+                new CertificateResponse { Uuid = "real-1", CommonName = "real1.example.com", Status = "ACTIVE", CertificateType = "CSC TrustedSecure DV", Certificate = apiCert }
+            }
+        });
+
+        var plugin = MakePlugin(mockClient);
+        var buffer = new BlockingCollection<AnyCAPluginCertificate>();
+
+        await plugin.Synchronize(buffer, null, true, CancellationToken.None);
+
+        Assert.Single(buffer);
+    }
+
+    [Fact]
+    public void MidCycleReissueFixtures_ReissueVariant_FlagsIsLifeCycleReIssueCertificate()
+    {
+        var baseline = MidCycleReissueFixtures.SingleNameBaseline();
+        var reissue = MidCycleReissueFixtures.SingleNameMidCycleReissue();
+
+        Assert.False(baseline.IsLifeCycleReIssueCertificate);
+        Assert.True(reissue.IsLifeCycleReIssueCertificate);
+        Assert.Equal(baseline.Uuid, reissue.Uuid);
+        Assert.Equal(baseline.OrderValidityStartDate, reissue.OrderValidityStartDate);
+        Assert.Equal(baseline.OrderValidityEndDate, reissue.OrderValidityEndDate);
+
+        // Different certificate (new serial/signature)...
+        Assert.NotEqual(baseline.Certificate, reissue.Certificate);
+        var baselineCert = DecodeApiCertificate(baseline.Certificate);
+        var reissueCert = DecodeApiCertificate(reissue.Certificate);
+        Assert.NotEqual(baselineCert.SerialNumber, reissueCert.SerialNumber);
+
+        // ...but re-signed from the same key pair, since CSC reissued without a new CSR.
+        Assert.Equal(baselineCert.GetPublicKey(), reissueCert.GetPublicKey());
+    }
+
+    private static X509Certificate2 DecodeApiCertificate(string apiBase64)
+    {
+        var pem = Encoding.UTF8.GetString(Convert.FromBase64String(apiBase64));
+        var body = pem.Replace("-----BEGIN CERTIFICATE-----", "").Replace("-----END CERTIFICATE-----", "");
+        return new X509Certificate2(Convert.FromBase64String(body));
+    }
+
+    // ---------------------------------------------------------------------
     // Revoke
     // ---------------------------------------------------------------------
 
@@ -632,6 +794,10 @@ public class CSCGlobalCAPluginTests
 
         var result = await plugin.Enroll("csr", "CN=test", new Dictionary<string, string[]>(), productInfo,
             RequestFormat.PKCS10, EnrollmentType.RenewOrReissue);
+
+        Assert.Equal((int)EndEntityStatus.EXTERNALVALIDATION, result!.Status);
+        mockClient.Verify(c => c.SubmitReissueAsync(It.IsAny<ReissueRequest>()), Times.Once);
+    }
 
     [Fact]
     public void GetProductIds_ReturnsCanonicalAndLegacyNames()
@@ -1143,7 +1309,7 @@ public class CSCGlobalCAPluginTests
         var plugin = MakePlugin();
         var annotations = plugin.GetCAConnectorAnnotations();
 
-        Assert.Equal(7, annotations.Count);
+        Assert.Equal(8, annotations.Count);
         Assert.Contains(Constants.Enabled, annotations.Keys);
         Assert.Contains(Constants.CscGlobalUrl, annotations.Keys);
         Assert.Contains(Constants.CscGlobalApiKey, annotations.Keys);
@@ -1151,6 +1317,7 @@ public class CSCGlobalCAPluginTests
         Assert.Contains(Constants.DefaultPageSize, annotations.Keys);
         Assert.Contains(Constants.SyncFilterDays, annotations.Keys);
         Assert.Contains(Constants.RenewalWindowDays, annotations.Keys);
+        Assert.Contains(Constants.MockReissueRun, annotations.Keys);
         Assert.True(annotations[Constants.CscGlobalApiKey].Hidden);
     }
 
@@ -1163,17 +1330,6 @@ public class CSCGlobalCAPluginTests
         Assert.Equal(12, annotations.Count);
         Assert.Contains(EnrollmentConfigConstants.Term, annotations.Keys);
         Assert.Contains(EnrollmentConfigConstants.AdditionalSansCommaSeparatedDcvEmails, annotations.Keys);
-    }
-
-    [Fact]
-    public void GetProductIds_ReturnsFullList()
-    {
-        var plugin = MakePlugin();
-        var ids = plugin.GetProductIds();
-
-        Assert.Equal(10, ids.Count);
-        Assert.Contains("CSC TrustedSecure OV", ids);
-        Assert.Contains("CSC TrustedSecure DV Wildcard, Multiple Names", ids);
     }
 
     // ---------------------------------------------------------------------
