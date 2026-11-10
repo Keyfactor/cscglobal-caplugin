@@ -24,4 +24,18 @@ public class CertificateResponse : ICertificateResponse
     [JsonProperty("orderDate")] public string OrderDate { get; set; }
     [JsonProperty("serverSoftware")] public object ServerSoftware { get; set; }
     [JsonProperty("certificate")] public string Certificate { get; set; }
+
+    // CSC's actual order term - not currently used for the renewal/reissue window calculation,
+    // which still assumes orderDate + 1 year (see CSCGlobalCAPlugin.RenewOrReissue). Null for most
+    // existing orders; populated on at least some newer ones.
+    [JsonProperty("orderValidityStartDate")] public string OrderValidityStartDate { get; set; }
+    [JsonProperty("orderValidityEndDate")] public string OrderValidityEndDate { get; set; }
+
+    [JsonProperty("isRenewed")] public bool IsRenewed { get; set; }
+
+    // True when CSC silently reissued this certificate mid-order-term (observed as the same
+    // Uuid reappearing in the list/get response with a new certificate - and no corresponding
+    // private key on Keyfactor's side, since CSC generates the reissued key pair itself). Not yet
+    // acted on anywhere in the plugin; see the mid-cycle-reissue mock fixtures in the test project.
+    [JsonProperty("isLifeCycleReIssueCertificate")] public bool IsLifeCycleReIssueCertificate { get; set; }
 }
