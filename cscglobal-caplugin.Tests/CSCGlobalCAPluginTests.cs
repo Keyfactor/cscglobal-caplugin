@@ -9,6 +9,7 @@ using Keyfactor.AnyGateway.Extensions;
 using Keyfactor.Extensions.CAPlugin.CSCGlobal;
 using Keyfactor.Extensions.CAPlugin.CSCGlobal.Client.Models;
 using Keyfactor.Extensions.CAPlugin.CSCGlobal.Interfaces;
+using Keyfactor.Extensions.CAPlugin.CSCGlobal.MockData;
 using Keyfactor.PKI.Enums.EJBCA;
 using Moq;
 using Xunit;
@@ -498,7 +499,22 @@ public class CSCGlobalCAPluginTests
         Assert.Equal(baseline.Uuid, reissue.Uuid);
         Assert.Equal(baseline.OrderValidityStartDate, reissue.OrderValidityStartDate);
         Assert.Equal(baseline.OrderValidityEndDate, reissue.OrderValidityEndDate);
+
+        // Different certificate (new serial/signature)...
         Assert.NotEqual(baseline.Certificate, reissue.Certificate);
+        var baselineCert = DecodeApiCertificate(baseline.Certificate);
+        var reissueCert = DecodeApiCertificate(reissue.Certificate);
+        Assert.NotEqual(baselineCert.SerialNumber, reissueCert.SerialNumber);
+
+        // ...but re-signed from the same key pair, since CSC reissued without a new CSR.
+        Assert.Equal(baselineCert.GetPublicKey(), reissueCert.GetPublicKey());
+    }
+
+    private static X509Certificate2 DecodeApiCertificate(string apiBase64)
+    {
+        var pem = Encoding.UTF8.GetString(Convert.FromBase64String(apiBase64));
+        var body = pem.Replace("-----BEGIN CERTIFICATE-----", "").Replace("-----END CERTIFICATE-----", "");
+        return new X509Certificate2(Convert.FromBase64String(body));
     }
 
     // ---------------------------------------------------------------------

@@ -6,32 +6,45 @@ using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using Keyfactor.Extensions.CAPlugin.CSCGlobal.Client.Models;
 
-namespace CscGlobalCAPluginTests;
+namespace Keyfactor.Extensions.CAPlugin.CSCGlobal.MockData;
 
 /// <summary>
 ///     Mock CSC "mid-cycle reissue" API responses, reproducing a real-world scenario: CSC
-///     silently reissues a certificate partway through its order term - same uuid, a new
-///     certificate/key pair CSC generated itself (not from Keyfactor's CSR), and
-///     isLifeCycleReIssueCertificate set to true on the next list/get response. Keyfactor never
-///     holds the private key for the reissued certificate, since it didn't come from our CSR.
+///     silently reissues a certificate partway through its order term - same uuid, re-signed
+///     with the *same* key pair as the original (new serial number, shifted validity dates),
+///     and isLifeCycleReIssueCertificate set to true on the next list/get response.
 ///
 ///     As of this fixture, the plugin does not special-case this flag anywhere - these fixtures
 ///     exist to let that gap be exercised and tested before any handling is decided/implemented.
 ///
 ///     Metadata (uuid, commonName, certificateType, dates) is taken from real CSC API responses;
-///     only the certificate/key material is synthetic (freshly generated per test run).
+///     only the certificate material is synthetic (freshly generated per test run), though the
+///     baseline and its reissue deliberately share one RSA key pair, re-signed twice.
 /// </summary>
 public static class MidCycleReissueFixtures
 {
-    private static (string Pem, string ApiBase64) MakeApiCertificate(string commonName)
+    // Keyed by scenario uuid so the baseline and its mid-cycle reissue are re-signed from the
+    // same key pair, as they would be if CSC reissued the certificate without a new CSR.
+    private static readonly Dictionary<string, RSA> ScenarioKeys = new();
+
+    private static RSA GetOrCreateKey(string uuid)
     {
-        using var rsa = RSA.Create(2048);
-        var req = new CertificateRequest($"CN={commonName}", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
-        var cert = req.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(365));
+        if (!ScenarioKeys.TryGetValue(uuid, out var key))
+        {
+            key = RSA.Create(2048);
+            ScenarioKeys[uuid] = key;
+        }
+        return key;
+    }
+
+    private static string MakeApiCertificate(string commonName, RSA key, DateTimeOffset notBefore, DateTimeOffset notAfter)
+    {
+        var req = new CertificateRequest($"CN={commonName}", key, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        using var cert = req.CreateSelfSigned(notBefore, notAfter);
         var pem = "-----BEGIN CERTIFICATE-----\n" +
                   Convert.ToBase64String(cert.RawData, Base64FormattingOptions.InsertLineBreaks) +
                   "\n-----END CERTIFICATE-----\n";
-        return (pem, Convert.ToBase64String(Encoding.UTF8.GetBytes(pem)));
+        return Convert.ToBase64String(Encoding.UTF8.GetBytes(pem));
     }
 
     /// <summary>
@@ -40,10 +53,13 @@ public static class MidCycleReissueFixtures
     /// </summary>
     public static CertificateResponse SingleNameBaseline()
     {
-        var (_, apiCert) = MakeApiCertificate("cnn.keyfactortestb.com");
+        const string uuid = "96d8802a-94f5-4616-a27d-bd51bb6eca18";
+        var key = GetOrCreateKey(uuid);
+        var apiCert = MakeApiCertificate("cnn.keyfactortestb.com", key,
+            DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(365));
         return new CertificateResponse
         {
-            Uuid = "96d8802a-94f5-4616-a27d-bd51bb6eca18",
+            Uuid = uuid,
             CommonName = "cnn.keyfactortestb.com",
             AdditionalNames = new List<string>(),
             CertificateType = "CSC TrustedSecure DV",
@@ -63,16 +79,17 @@ public static class MidCycleReissueFixtures
     }
 
     /// <summary>
-    ///     Same uuid/order as <see cref="SingleNameBaseline" />, reappearing with a CSC-generated
-    ///     reissue mid-term: isLifeCycleReIssueCertificate is true, effective/expiration shifted
-    ///     forward to the reissue date, order validity window unchanged, and a certificate whose
-    ///     key Keyfactor never saw.
+    ///     Same uuid/order/key pair as <see cref="SingleNameBaseline" />, reappearing with a
+    ///     mid-term reissue: isLifeCycleReIssueCertificate is true, effective/expiration shifted
+    ///     forward to the reissue date, order validity window unchanged, and a *new certificate
+    ///     re-signed from the same key* - a new serial number, not a new key pair.
     /// </summary>
     public static CertificateResponse SingleNameMidCycleReissue()
     {
         var baseline = SingleNameBaseline();
-        var (_, apiCert) = MakeApiCertificate(baseline.CommonName);
-        baseline.Certificate = apiCert;
+        var key = GetOrCreateKey(baseline.Uuid);
+        baseline.Certificate = MakeApiCertificate(baseline.CommonName, key,
+            DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddDays(366));
         baseline.EffectiveDate = "05-Nov-2026";
         baseline.ExpirationDate = "23-May-2027";
         baseline.OrderDate = "05-Nov-2026";
@@ -86,10 +103,13 @@ public static class MidCycleReissueFixtures
     /// </summary>
     public static CertificateResponse WildcardMultiNameBaseline()
     {
-        var (_, apiCert) = MakeApiCertificate("*.boingy.com");
+        const string uuid = "7db327f6-34a0-4919-9af1-1a76277cc2a7";
+        var key = GetOrCreateKey(uuid);
+        var apiCert = MakeApiCertificate("*.boingy.com", key,
+            DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(365));
         return new CertificateResponse
         {
-            Uuid = "7db327f6-34a0-4919-9af1-1a76277cc2a7",
+            Uuid = uuid,
             CommonName = "*.boingy.com",
             AdditionalNames = new List<string>(),
             CertificateType = "CSC TrustedSecure DV Wildcard, Multiple Names",
@@ -108,12 +128,13 @@ public static class MidCycleReissueFixtures
         };
     }
 
-    /// <summary>Mid-cycle reissue of <see cref="WildcardMultiNameBaseline" />.</summary>
+    /// <summary>Mid-cycle reissue of <see cref="WildcardMultiNameBaseline" />, re-signed from the same key.</summary>
     public static CertificateResponse WildcardMultiNameMidCycleReissue()
     {
         var baseline = WildcardMultiNameBaseline();
-        var (_, apiCert) = MakeApiCertificate(baseline.CommonName);
-        baseline.Certificate = apiCert;
+        var key = GetOrCreateKey(baseline.Uuid);
+        baseline.Certificate = MakeApiCertificate(baseline.CommonName, key,
+            DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddDays(366));
         baseline.EffectiveDate = "02-Dec-2026";
         baseline.ExpirationDate = "20-Jun-2027";
         baseline.OrderDate = "02-Dec-2026";

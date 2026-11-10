@@ -25,6 +25,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\cscglobal-caplugin\CSCGlobalCAPlugin.csproj" />
+    <ProjectReference Include="..\cscglobal-caplugin.MockData\CSCGlobalCAPlugin.MockData.csproj" />
   </ItemGroup>
 
 </Project>
