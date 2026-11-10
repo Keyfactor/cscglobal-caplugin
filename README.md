@@ -4,7 +4,7 @@
 
 <p align="center">
   <!-- Badges -->
-<img src="https://img.shields.io/badge/integration_status-pilot-3D1973?style=flat-square" alt="Integration Status: pilot" />
+<img src="https://img.shields.io/badge/integration_status-production-3D1973?style=flat-square" alt="Integration Status: production" />
 <a href="https://github.com/Keyfactor/cscglobal-caplugin/releases"><img src="https://img.shields.io/github/v/release/Keyfactor/cscglobal-caplugin?style=flat-square" alt="Release" /></a>
 <img src="https://img.shields.io/github/issues/Keyfactor/cscglobal-caplugin?style=flat-square" alt="Issues" />
 <img src="https://img.shields.io/github/downloads/Keyfactor/cscglobal-caplugin/total?style=flat-square&label=downloads&color=28B905" alt="GitHub Downloads (all assets, all releases)" />

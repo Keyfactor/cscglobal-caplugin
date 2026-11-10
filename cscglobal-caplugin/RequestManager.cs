@@ -23,6 +23,13 @@ public class RequestManager
     public static Func<string, string> Pemify = ss =>
         ss.Length <= 64 ? ss : ss.Substring(0, 64) + "\n" + Pemify(ss.Substring(64));
 
+    // Certificate type codes (see ProductIdToCodeMap below) that carry multiple names
+    // and therefore need SubjectAlternativeNames populated on the registration request.
+    private static readonly HashSet<string> MultiNameCertificateTypes = new() { "2", "6", "7", "8", "9" };
+
+    // Certificate type codes that require EvCertificateDetails (Organization Country, etc.).
+    private static readonly HashSet<string> EvCertificateTypes = new() { "3", "7" };
+
     private static string GetOptionalParam(EnrollmentProductInfo productInfo, string key)
     {
         return productInfo.ProductParameters != null &&
@@ -322,12 +329,36 @@ public class RequestManager
         };
     }
 
+    // Maps each canonical (1.2.0+) product ID to the numeric certificate type code CSC's API
+    // expects on enrollment. Order matches ProductIDs.productIds in Constants.cs.
+    private static readonly Dictionary<string, string> ProductIdToCodeMap = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["CSC TrustedSecure OV"] = "0",
+        ["CSC TrustedSecure OV Wildcard"] = "1",
+        ["CSC TrustedSecure OV, Multiple Names"] = "2",
+        ["CSC TrustedSecure EV"] = "3",
+        ["CSC TrustedSecure DV"] = "4",
+        ["CSC TrustedSecure DV Wildcard"] = "5",
+        ["CSC TrustedSecure DV, Multiple Names"] = "6",
+        ["CSC TrustedSecure EV, Multiple Names"] = "7",
+        ["CSC TrustedSecure OV Wildcard, Multiple Names"] = "8",
+        ["CSC TrustedSecure DV Wildcard, Multiple Names"] = "9"
+    };
+
     private string GetCertificateType(string productId)
     {
         if (productId != null && ProductIDs.legacyProductIdAliases.TryGetValue(productId, out var canonicalProductId))
         {
             productId = canonicalProductId;
         }
+
+        if (productId != null && ProductIdToCodeMap.TryGetValue(productId, out var code))
+        {
+            return code;
+        }
+
+        return "-1";
+    }
 
     public Notifications GetNotifications(EnrollmentProductInfo productInfo)
     {
