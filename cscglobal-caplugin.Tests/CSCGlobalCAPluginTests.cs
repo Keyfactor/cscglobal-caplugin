@@ -489,6 +489,79 @@ public class CSCGlobalCAPluginTests
     }
 
     [Fact]
+    public void Initialize_MockReissueRunMissing_DefaultsToFalse()
+    {
+        var plugin = MakePlugin();
+        Assert.False(plugin.MockReissueRun);
+    }
+
+    [Fact]
+    public void Initialize_MockReissueRunTrue_ParsesTrue()
+    {
+        var data = ValidConnectionData();
+        data[Constants.MockReissueRun] = "true";
+        var plugin = MakePlugin(connectionData: data);
+        Assert.True(plugin.MockReissueRun);
+    }
+
+    [Fact]
+    public async Task Synchronize_MockReissueRunEnabled_InjectsSyntheticDuplicateForEachActiveCert()
+    {
+        var (_, pem) = MakeSelfSignedCert();
+        var apiCert = ToApiBase64(pem);
+
+        var mockClient = new Mock<ICscGlobalClient>();
+        mockClient.Setup(c => c.SubmitCertificateListRequestAsync(null)).ReturnsAsync(new CertificateListResponse
+        {
+            Results = new List<CertificateResponse>
+            {
+                new CertificateResponse { Uuid = "real-1", CommonName = "real1.example.com", Status = "ACTIVE", CertificateType = "CSC TrustedSecure DV", Certificate = apiCert },
+                new CertificateResponse { Uuid = "real-2", CommonName = "real2.example.com", Status = "REVOKED", CertificateType = "CSC TrustedSecure DV", Certificate = apiCert }
+            }
+        });
+
+        var data = ValidConnectionData();
+        data[Constants.MockReissueRun] = "true";
+        var plugin = MakePlugin(mockClient, connectionData: data);
+        var buffer = new BlockingCollection<AnyCAPluginCertificate>();
+
+        await plugin.Synchronize(buffer, null, true, CancellationToken.None);
+
+        var items = buffer.ToList();
+
+        // real-1 is ACTIVE -> gets a synthetic reissue duplicate injected. real-2 is REVOKED ->
+        // no injection, since there's nothing to "reissue mid-cycle" for a revoked certificate.
+        Assert.Equal(3, items.Count);
+        var real1Items = items.Where(i => i.CARequestID == "real-1").ToList();
+        Assert.Equal(2, real1Items.Count);
+        Assert.NotEqual(real1Items[0].Certificate, real1Items[1].Certificate);
+        Assert.Single(items, i => i.CARequestID == "real-2");
+    }
+
+    [Fact]
+    public async Task Synchronize_MockReissueRunDisabled_DoesNotInjectDuplicates()
+    {
+        var (_, pem) = MakeSelfSignedCert();
+        var apiCert = ToApiBase64(pem);
+
+        var mockClient = new Mock<ICscGlobalClient>();
+        mockClient.Setup(c => c.SubmitCertificateListRequestAsync(null)).ReturnsAsync(new CertificateListResponse
+        {
+            Results = new List<CertificateResponse>
+            {
+                new CertificateResponse { Uuid = "real-1", CommonName = "real1.example.com", Status = "ACTIVE", CertificateType = "CSC TrustedSecure DV", Certificate = apiCert }
+            }
+        });
+
+        var plugin = MakePlugin(mockClient);
+        var buffer = new BlockingCollection<AnyCAPluginCertificate>();
+
+        await plugin.Synchronize(buffer, null, true, CancellationToken.None);
+
+        Assert.Single(buffer);
+    }
+
+    [Fact]
     public void MidCycleReissueFixtures_ReissueVariant_FlagsIsLifeCycleReIssueCertificate()
     {
         var baseline = MidCycleReissueFixtures.SingleNameBaseline();
@@ -1236,7 +1309,7 @@ public class CSCGlobalCAPluginTests
         var plugin = MakePlugin();
         var annotations = plugin.GetCAConnectorAnnotations();
 
-        Assert.Equal(7, annotations.Count);
+        Assert.Equal(8, annotations.Count);
         Assert.Contains(Constants.Enabled, annotations.Keys);
         Assert.Contains(Constants.CscGlobalUrl, annotations.Keys);
         Assert.Contains(Constants.CscGlobalApiKey, annotations.Keys);
@@ -1244,6 +1317,7 @@ public class CSCGlobalCAPluginTests
         Assert.Contains(Constants.DefaultPageSize, annotations.Keys);
         Assert.Contains(Constants.SyncFilterDays, annotations.Keys);
         Assert.Contains(Constants.RenewalWindowDays, annotations.Keys);
+        Assert.Contains(Constants.MockReissueRun, annotations.Keys);
         Assert.True(annotations[Constants.CscGlobalApiKey].Hidden);
     }
 

@@ -16,6 +16,13 @@ public class Constants
     public static string DefaultPageSize = "DefaultPageSize";
     public static string SyncFilterDays = "SyncFilterDays";
     public static string RenewalWindowDays = "RenewalWindowDays";
+
+    // When true, Synchronize injects a synthetic "mid-cycle reissue" duplicate for every real
+    // ACTIVE certificate CSC returns - same CARequestID, a freshly generated key/certificate (we
+    // never hold CSC's actual key), isLifeCycleReIssueCertificate-style scenario. Lets the reissue
+    // collision be reproduced live against a real CSC account instead of a separate mock server.
+    // Never enable this against a production CA connection.
+    public static string MockReissueRun = "MockReissueRun";
 }
     
 public class ProductIDs
