@@ -429,6 +429,79 @@ public class CSCGlobalCAPluginTests
     }
 
     // ---------------------------------------------------------------------
+    // Synchronize - mid-cycle reissue repro (CSC reissues a cert under the same uuid
+    // partway through its order term, with a key pair Keyfactor never held). The plugin
+    // does not special-case this today; these tests document and pin down that baseline
+    // so a fix can be verified against it later.
+    // ---------------------------------------------------------------------
+
+    [Fact]
+    public async Task Synchronize_MidCycleReissue_SameUuidQueuedTwiceWithDifferentCertificates()
+    {
+        var baseline = MidCycleReissueFixtures.SingleNameBaseline();
+        var reissue = MidCycleReissueFixtures.SingleNameMidCycleReissue();
+
+        var mockClient = new Mock<ICscGlobalClient>();
+        mockClient.Setup(c => c.SubmitCertificateListRequestAsync(null)).ReturnsAsync(new CertificateListResponse
+        {
+            Results = new List<CertificateResponse> { baseline, reissue }
+        });
+
+        var plugin = MakePlugin(mockClient);
+        var buffer = new BlockingCollection<AnyCAPluginCertificate>();
+
+        await plugin.Synchronize(buffer, null, true, CancellationToken.None);
+
+        var items = buffer.ToList();
+
+        // Today: both records are queued independently under the same CARequestID (the shared
+        // uuid), with different certificate content, and nothing reflects that the second one
+        // was a mid-cycle reissue rather than an ordinary sync of the same certificate.
+        Assert.Equal(2, items.Count);
+        Assert.All(items, i => Assert.Equal(baseline.Uuid, i.CARequestID));
+        Assert.NotEqual(items[0].Certificate, items[1].Certificate);
+    }
+
+    [Fact]
+    public async Task Synchronize_MidCycleReissue_WildcardMultiName_SameUuidQueuedTwiceWithDifferentCertificates()
+    {
+        var baseline = MidCycleReissueFixtures.WildcardMultiNameBaseline();
+        var reissue = MidCycleReissueFixtures.WildcardMultiNameMidCycleReissue();
+
+        var mockClient = new Mock<ICscGlobalClient>();
+        mockClient.Setup(c => c.SubmitCertificateListRequestAsync(null)).ReturnsAsync(new CertificateListResponse
+        {
+            Results = new List<CertificateResponse> { baseline, reissue }
+        });
+
+        var plugin = MakePlugin(mockClient);
+        var buffer = new BlockingCollection<AnyCAPluginCertificate>();
+
+        await plugin.Synchronize(buffer, null, true, CancellationToken.None);
+
+        var items = buffer.ToList();
+
+        Assert.Equal(2, items.Count);
+        Assert.All(items, i => Assert.Equal(baseline.Uuid, i.CARequestID));
+        Assert.All(items, i => Assert.Equal("CSC TrustedSecure DV Wildcard, Multiple Names", i.ProductID));
+        Assert.NotEqual(items[0].Certificate, items[1].Certificate);
+    }
+
+    [Fact]
+    public void MidCycleReissueFixtures_ReissueVariant_FlagsIsLifeCycleReIssueCertificate()
+    {
+        var baseline = MidCycleReissueFixtures.SingleNameBaseline();
+        var reissue = MidCycleReissueFixtures.SingleNameMidCycleReissue();
+
+        Assert.False(baseline.IsLifeCycleReIssueCertificate);
+        Assert.True(reissue.IsLifeCycleReIssueCertificate);
+        Assert.Equal(baseline.Uuid, reissue.Uuid);
+        Assert.Equal(baseline.OrderValidityStartDate, reissue.OrderValidityStartDate);
+        Assert.Equal(baseline.OrderValidityEndDate, reissue.OrderValidityEndDate);
+        Assert.NotEqual(baseline.Certificate, reissue.Certificate);
+    }
+
+    // ---------------------------------------------------------------------
     // Revoke
     // ---------------------------------------------------------------------
 
