@@ -633,6 +633,10 @@ public class CSCGlobalCAPluginTests
         var result = await plugin.Enroll("csr", "CN=test", new Dictionary<string, string[]>(), productInfo,
             RequestFormat.PKCS10, EnrollmentType.RenewOrReissue);
 
+        Assert.Equal((int)EndEntityStatus.EXTERNALVALIDATION, result!.Status);
+        mockClient.Verify(c => c.SubmitReissueAsync(It.IsAny<ReissueRequest>()), Times.Once);
+    }
+
     [Fact]
     public void GetProductIds_ReturnsCanonicalAndLegacyNames()
     {
@@ -1163,17 +1167,6 @@ public class CSCGlobalCAPluginTests
         Assert.Equal(12, annotations.Count);
         Assert.Contains(EnrollmentConfigConstants.Term, annotations.Keys);
         Assert.Contains(EnrollmentConfigConstants.AdditionalSansCommaSeparatedDcvEmails, annotations.Keys);
-    }
-
-    [Fact]
-    public void GetProductIds_ReturnsFullList()
-    {
-        var plugin = MakePlugin();
-        var ids = plugin.GetProductIds();
-
-        Assert.Equal(10, ids.Count);
-        Assert.Contains("CSC TrustedSecure OV", ids);
-        Assert.Contains("CSC TrustedSecure DV Wildcard, Multiple Names", ids);
     }
 
     // ---------------------------------------------------------------------
