@@ -268,14 +268,23 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
 
                         if (MockReissueRun && certStatus == Convert.ToInt32(EndEntityStatus.GENERATED))
                         {
-                            var mockCertString = GenerateMockReissueCertificate(
+                            var (mockCertString, mockSerialNumber) = GenerateMockReissueCertificate(
                                 currentResponseItem?.CommonName ?? currentResponseItem?.Uuid ?? "mock-reissue.invalid");
+                            // AnyGatewayCore's CertificateService.CreateOrUpdateCertificate only writes a cert into a
+                            // row the first time it's populated - if a row for this CARequestID already has a cert,
+                            // it logs "The existing certificate will be preserved" and leaves it alone, with no
+                            // config to override that. Reusing currentResponseItem.Uuid here would collide with the
+                            // real cert's row and be silently dropped. Deriving the CARequestID from the mock cert's
+                            // serial number (always different, since it's freshly generated each call) gives every
+                            // sync run's duplicate its own new row, instead of colliding with a fixed suffix's row
+                            // from a prior sync, at the cost of diverging from CSC's real same-UUID reissue continuity.
+                            var mockCARequestId = $"{currentResponseItem?.Uuid}-mock-{mockSerialNumber}";
                             Logger.LogWarning(
-                                "MockReissueRun: injecting synthetic mid-cycle-reissue duplicate for {Uuid} ({CommonName})",
-                                currentResponseItem?.Uuid, currentResponseItem?.CommonName);
+                                "MockReissueRun: injecting synthetic mid-cycle-reissue duplicate for {Uuid} ({CommonName}) under derived CARequestID {MockCARequestId}",
+                                currentResponseItem?.Uuid, currentResponseItem?.CommonName, mockCARequestId);
                             blockingBuffer.Add(new AnyCAPluginCertificate
                             {
-                                CARequestID = $"{currentResponseItem?.Uuid}",
+                                CARequestID = mockCARequestId,
                                 Certificate = mockCertString,
                                 Status = certStatus,
                                 ProductID = productId
@@ -897,13 +906,16 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
 
     // Test/diagnostic only - see Constants.MockReissueRun. Generates a self-signed leaf cert with
     // a brand-new key pair for the given common name, standing in for a CSC mid-cycle reissue we
-    // never got a CSR for (so there's no real key to reuse, unlike a reissue we initiated).
-    private static string GenerateMockReissueCertificate(string commonName)
+    // never got a CSR for (so there's no real key to reuse, unlike a reissue we initiated). Also
+    // returns the cert's serial number, which the caller uses to derive a CARequestID that's
+    // unique per sync run (a fixed suffix would collide with its own prior mock row on the next
+    // sync, hitting the same "existing certificate will be preserved" problem again).
+    private static (string CertString, string SerialNumber) GenerateMockReissueCertificate(string commonName)
     {
         using var rsa = RSA.Create(2048);
         var req = new CertificateRequest($"CN={commonName}", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
         using var cert = req.CreateSelfSigned(DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddDays(365));
-        return Convert.ToBase64String(cert.Export(X509ContentType.Cert));
+        return (Convert.ToBase64String(cert.Export(X509ContentType.Cert)), cert.SerialNumber);
     }
 
     #region PRIVATE
