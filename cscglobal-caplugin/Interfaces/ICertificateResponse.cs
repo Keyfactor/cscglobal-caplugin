@@ -21,4 +21,8 @@ public interface ICertificateResponse
     string OrderDate { get; set; }
     object ServerSoftware { get; set; }
     string Certificate { get; set; }
+    string OrderValidityStartDate { get; set; }
+    string OrderValidityEndDate { get; set; }
+    bool IsRenewed { get; set; }
+    bool IsLifeCycleReIssueCertificate { get; set; }
 }

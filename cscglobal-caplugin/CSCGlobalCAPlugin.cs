@@ -56,6 +56,9 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
     // whether to submit a paid Renewal or a free Reissue under the still-active order.
     public int RenewalWindowDays { get; set; }
 
+    // Test/diagnostic only - see Constants.MockReissueRun. Never set true against a production CA.
+    public bool MockReissueRun { get; set; }
+
     //done
     public void Initialize(IAnyCAPluginConfigProvider configProvider, ICertificateDataReader certificateDataReader)
     {
@@ -97,6 +100,17 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
                 Logger.LogWarning($"Could not parse {Constants.RenewalWindowDays} value '{renewalWindowObj}' as a positive integer; using default of {RenewalWindowDays} days");
         }
         Logger.LogDebug("RenewalWindowDays configured to {Days} days", RenewalWindowDays);
+
+        MockReissueRun = false; // default
+        if (configProvider.CAConnectionData.TryGetValue(Constants.MockReissueRun, out var mockReissueObj))
+        {
+            if (bool.TryParse(mockReissueObj?.ToString(), out var mockReissueParsed))
+                MockReissueRun = mockReissueParsed;
+            else
+                Logger.LogWarning($"Could not parse {Constants.MockReissueRun} value '{mockReissueObj}' as a bool; defaulting to false");
+        }
+        if (MockReissueRun)
+            Logger.LogWarning("MockReissueRun is enabled - Synchronize will inject synthetic mid-cycle-reissue certificates. Do not use against a production CA connection.");
 
         Logger.LogInformation("CSCGlobalCAPlugin initialized successfully");
         Logger.MethodExit(LogLevel.Debug);
@@ -251,6 +265,32 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
                             ProductID = productId
                         }, cancelToken);
                         queuedCount++;
+
+                        if (MockReissueRun && certStatus == Convert.ToInt32(EndEntityStatus.GENERATED))
+                        {
+                            var (mockCertString, mockSerialNumber) = GenerateMockReissueCertificate(
+                                currentResponseItem?.CommonName ?? currentResponseItem?.Uuid ?? "mock-reissue.invalid");
+                            // AnyGatewayCore's CertificateService.CreateOrUpdateCertificate only writes a cert into a
+                            // row the first time it's populated - if a row for this CARequestID already has a cert,
+                            // it logs "The existing certificate will be preserved" and leaves it alone, with no
+                            // config to override that. Reusing currentResponseItem.Uuid here would collide with the
+                            // real cert's row and be silently dropped. Deriving the CARequestID from the mock cert's
+                            // serial number (always different, since it's freshly generated each call) gives every
+                            // sync run's duplicate its own new row, instead of colliding with a fixed suffix's row
+                            // from a prior sync, at the cost of diverging from CSC's real same-UUID reissue continuity.
+                            var mockCARequestId = $"{currentResponseItem?.Uuid}-mock-{mockSerialNumber}";
+                            Logger.LogWarning(
+                                "MockReissueRun: injecting synthetic mid-cycle-reissue duplicate for {Uuid} ({CommonName}) under derived CARequestID {MockCARequestId}",
+                                currentResponseItem?.Uuid, currentResponseItem?.CommonName, mockCARequestId);
+                            blockingBuffer.Add(new AnyCAPluginCertificate
+                            {
+                                CARequestID = mockCARequestId,
+                                Certificate = mockCertString,
+                                Status = certStatus,
+                                ProductID = productId
+                            }, cancelToken);
+                            queuedCount++;
+                        }
                     }
                     else
                     {
@@ -735,6 +775,13 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
                 Hidden = false,
                 DefaultValue = "30",
                 Type = "Number"
+            },
+            [Constants.MockReissueRun] = new()
+            {
+                Comments = "TEST/DIAGNOSTIC ONLY. When true, Synchronize injects a synthetic mid-cycle-reissue duplicate (freshly generated key, not CSC's) for every real ACTIVE certificate returned. Never enable against a production CA connection. Default is false.",
+                Hidden = false,
+                DefaultValue = "false",
+                Type = "String"
             }
         };
     }
@@ -855,6 +902,20 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
         return ProductIDs.productIds
             .Concat(ProductIDs.legacyProductIdAliases.Keys)
             .ToList();
+    }
+
+    // Test/diagnostic only - see Constants.MockReissueRun. Generates a self-signed leaf cert with
+    // a brand-new key pair for the given common name, standing in for a CSC mid-cycle reissue we
+    // never got a CSR for (so there's no real key to reuse, unlike a reissue we initiated). Also
+    // returns the cert's serial number, which the caller uses to derive a CARequestID that's
+    // unique per sync run (a fixed suffix would collide with its own prior mock row on the next
+    // sync, hitting the same "existing certificate will be preserved" problem again).
+    private static (string CertString, string SerialNumber) GenerateMockReissueCertificate(string commonName)
+    {
+        using var rsa = RSA.Create(2048);
+        var req = new CertificateRequest($"CN={commonName}", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        using var cert = req.CreateSelfSigned(DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddDays(365));
+        return (Convert.ToBase64String(cert.Export(X509ContentType.Cert)), cert.SerialNumber);
     }
 
     #region PRIVATE
