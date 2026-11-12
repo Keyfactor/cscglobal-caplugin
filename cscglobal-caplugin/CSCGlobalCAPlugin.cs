@@ -65,6 +65,10 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
     // Test/diagnostic only - see Constants.MockReissueRun. Never set true against a production CA.
     public bool MockReissueRun { get; set; }
 
+    // Test/diagnostic only - see Constants.AppendThumbprintToCaId. Never set true against a
+    // production CA.
+    public bool AppendThumbprintToCaId { get; set; }
+
     //done
     public void Initialize(IAnyCAPluginConfigProvider configProvider, ICertificateDataReader certificateDataReader)
     {
@@ -117,6 +121,17 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
         }
         if (MockReissueRun)
             Logger.LogWarning("MockReissueRun is enabled - Synchronize will inject synthetic mid-cycle-reissue certificates. Do not use against a production CA connection.");
+
+        AppendThumbprintToCaId = false; // default
+        if (configProvider.CAConnectionData.TryGetValue(Constants.AppendThumbprintToCaId, out var appendThumbprintObj))
+        {
+            if (bool.TryParse(appendThumbprintObj?.ToString(), out var appendThumbprintParsed))
+                AppendThumbprintToCaId = appendThumbprintParsed;
+            else
+                Logger.LogWarning($"Could not parse {Constants.AppendThumbprintToCaId} value '{appendThumbprintObj}' as a bool; defaulting to false");
+        }
+        if (AppendThumbprintToCaId)
+            Logger.LogWarning("AppendThumbprintToCaId is enabled - Synchronize will append the incoming certificate's thumbprint to each CARequestID. Do not use against a production CA connection.");
 
         Logger.LogInformation("CSCGlobalCAPlugin initialized successfully");
         Logger.MethodExit(LogLevel.Debug);
@@ -290,10 +305,19 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
                             }
                         }
 
+                        // Test/diagnostic only - see Constants.AppendThumbprintToCaId. Appending
+                        // the thumbprint makes each distinct certificate version for this UUID
+                        // land in its own gateway database row, instead of hitting
+                        // AnyGatewayCore's existing-certificate-preserve behavior under the plain
+                        // UUID - lets a sync be compared both ways.
+                        var caRequestId = $"{currentResponseItem?.Uuid}";
+                        if (AppendThumbprintToCaId)
+                            caRequestId = $"{caRequestId}-{ComputeThumbprint(certToQueue)}";
+
                         Logger.LogTrace($"Queueing Certificate ID {currentResponseItem?.Uuid} with ProductID '{productId ?? "(null)"}'");
                         blockingBuffer.Add(new AnyCAPluginCertificate
                         {
-                            CARequestID = $"{currentResponseItem?.Uuid}",
+                            CARequestID = caRequestId,
                             Certificate = certToQueue,
                             Status = certStatus,
                             ProductID = productId
@@ -786,7 +810,14 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
             },
             [Constants.MockReissueRun] = new()
             {
-                Comments = "TEST/DIAGNOSTIC ONLY. When true, Synchronize injects a synthetic mid-cycle-reissue duplicate (freshly generated key, not CSC's) for every real ACTIVE certificate returned. Never enable against a production CA connection. Default is false.",
+                Comments = "TEST/DIAGNOSTIC ONLY. When true, Synchronize substitutes a synthetic replacement certificate (freshly generated key, not CSC's) for each ACTIVE certificate starting on its second sync, matching CSC's real same-record reissue/renewal shape. Never enable against a production CA connection. Default is false.",
+                Hidden = false,
+                DefaultValue = "false",
+                Type = "String"
+            },
+            [Constants.AppendThumbprintToCaId] = new()
+            {
+                Comments = "TEST/DIAGNOSTIC ONLY. When true, Synchronize appends the incoming certificate's thumbprint to each CARequestID, so a changed certificate lands in its own gateway database row instead of being preserved under the existing row. Never enable against a production CA connection. Default is false.",
                 Hidden = false,
                 DefaultValue = "false",
                 Type = "String"
@@ -910,6 +941,15 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
         return ProductIDs.productIds
             .Concat(ProductIDs.legacyProductIdAliases.Keys)
             .ToList();
+    }
+
+    // Test/diagnostic only - see Constants.AppendThumbprintToCaId. SHA1-over-DER, matching
+    // AnyGatewayCore's own thumbprint convention (CertificateService.CreateOrUpdateCertificate).
+    private static string ComputeThumbprint(string base64DerCert)
+    {
+        using var sha1 = SHA1.Create();
+        var hash = sha1.ComputeHash(Convert.FromBase64String(base64DerCert));
+        return Convert.ToHexString(hash);
     }
 
     // Test/diagnostic only - see Constants.MockReissueRun. Reads the real leaf cert's own

@@ -552,6 +552,75 @@ public class CSCGlobalCAPluginTests
     }
 
     [Fact]
+    public void Initialize_AppendThumbprintToCaIdMissing_DefaultsToFalse()
+    {
+        var plugin = MakePlugin();
+        Assert.False(plugin.AppendThumbprintToCaId);
+    }
+
+    [Fact]
+    public void Initialize_AppendThumbprintToCaIdTrue_ParsesTrue()
+    {
+        var data = ValidConnectionData();
+        data[Constants.AppendThumbprintToCaId] = "true";
+        var plugin = MakePlugin(connectionData: data);
+        Assert.True(plugin.AppendThumbprintToCaId);
+    }
+
+    [Fact]
+    public async Task Synchronize_AppendThumbprintToCaIdEnabled_AppendsThumbprintToCARequestID()
+    {
+        var uuid = Guid.NewGuid().ToString();
+        var (cert, pem) = MakeSelfSignedCert();
+        var apiCert = ToApiBase64(pem);
+        var expectedThumbprint = Convert.ToHexString(cert.GetCertHash());
+
+        var mockClient = new Mock<ICscGlobalClient>();
+        mockClient.Setup(c => c.SubmitCertificateListRequestAsync(null)).ReturnsAsync(new CertificateListResponse
+        {
+            Results = new List<CertificateResponse>
+            {
+                new CertificateResponse { Uuid = uuid, CommonName = "real1.example.com", Status = "ACTIVE", CertificateType = "CSC TrustedSecure DV", Certificate = apiCert }
+            }
+        });
+
+        var data = ValidConnectionData();
+        data[Constants.AppendThumbprintToCaId] = "true";
+        var plugin = MakePlugin(mockClient, connectionData: data);
+        var buffer = new BlockingCollection<AnyCAPluginCertificate>();
+
+        await plugin.Synchronize(buffer, null, true, CancellationToken.None);
+
+        var item = Assert.Single(buffer);
+        Assert.Equal($"{uuid}-{expectedThumbprint}", item.CARequestID);
+    }
+
+    [Fact]
+    public async Task Synchronize_AppendThumbprintToCaIdDisabled_LeavesCARequestIDAsUuid()
+    {
+        var uuid = Guid.NewGuid().ToString();
+        var (_, pem) = MakeSelfSignedCert();
+        var apiCert = ToApiBase64(pem);
+
+        var mockClient = new Mock<ICscGlobalClient>();
+        mockClient.Setup(c => c.SubmitCertificateListRequestAsync(null)).ReturnsAsync(new CertificateListResponse
+        {
+            Results = new List<CertificateResponse>
+            {
+                new CertificateResponse { Uuid = uuid, CommonName = "real1.example.com", Status = "ACTIVE", CertificateType = "CSC TrustedSecure DV", Certificate = apiCert }
+            }
+        });
+
+        var plugin = MakePlugin(mockClient);
+        var buffer = new BlockingCollection<AnyCAPluginCertificate>();
+
+        await plugin.Synchronize(buffer, null, true, CancellationToken.None);
+
+        var item = Assert.Single(buffer);
+        Assert.Equal(uuid, item.CARequestID);
+    }
+
+    [Fact]
     public async Task Synchronize_MockReissueRunDisabled_DoesNotInjectDuplicates()
     {
         var (_, pem) = MakeSelfSignedCert();
@@ -1322,12 +1391,13 @@ public class CSCGlobalCAPluginTests
         var plugin = MakePlugin();
         var annotations = plugin.GetCAConnectorAnnotations();
 
-        Assert.Equal(8, annotations.Count);
+        Assert.Equal(9, annotations.Count);
         Assert.Contains(Constants.Enabled, annotations.Keys);
         Assert.Contains(Constants.CscGlobalUrl, annotations.Keys);
         Assert.Contains(Constants.CscGlobalApiKey, annotations.Keys);
         Assert.Contains(Constants.BearerToken, annotations.Keys);
         Assert.Contains(Constants.DefaultPageSize, annotations.Keys);
+        Assert.Contains(Constants.AppendThumbprintToCaId, annotations.Keys);
         Assert.Contains(Constants.SyncFilterDays, annotations.Keys);
         Assert.Contains(Constants.RenewalWindowDays, annotations.Keys);
         Assert.Contains(Constants.MockReissueRun, annotations.Keys);

@@ -17,12 +17,22 @@ public class Constants
     public static string SyncFilterDays = "SyncFilterDays";
     public static string RenewalWindowDays = "RenewalWindowDays";
 
-    // When true, Synchronize injects a synthetic "mid-cycle reissue" duplicate for every real
-    // ACTIVE certificate CSC returns - same CARequestID, a freshly generated key/certificate (we
-    // never hold CSC's actual key), isLifeCycleReIssueCertificate-style scenario. Lets the reissue
-    // collision be reproduced live against a real CSC account instead of a separate mock server.
-    // Never enable this against a production CA connection.
+    // When true, Synchronize substitutes a synthetic replacement certificate (same CARequestID,
+    // a freshly generated key - we never hold CSC's actual key) for every ACTIVE certificate that
+    // has already been synced once, starting on the second sync. Matches how CSC actually
+    // reports a mid-cycle reissue/renewal: a single record per UUID with its certificate field
+    // swapped in place, not a second record. Lets that scenario be reproduced live against a
+    // real CSC account instead of a separate mock server. Never enable this against a production
+    // CA connection.
     public static string MockReissueRun = "MockReissueRun";
+
+    // Test/diagnostic only. When true, Synchronize appends the incoming certificate's thumbprint
+    // to the CARequestID it hands to the gateway, so each distinct certificate version for a UUID
+    // lands in its own row instead of hitting AnyGatewayCore's existing-certificate-preserve
+    // behavior. Lets a sync be compared both ways: new cert visible in the gateway database
+    // (true) vs. the real-world behavior of the existing cert being preserved (false, default).
+    // Never enable this against a production CA connection.
+    public static string AppendThumbprintToCaId = "AppendThumbprintToCaId";
 }
     
 public class ProductIDs
