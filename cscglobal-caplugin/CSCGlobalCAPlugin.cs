@@ -268,17 +268,20 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
 
                         if (MockReissueRun && certStatus == Convert.ToInt32(EndEntityStatus.GENERATED))
                         {
-                            var (mockCertString, mockSerialNumber) = GenerateMockReissueCertificate(
-                                currentResponseItem?.CommonName ?? currentResponseItem?.Uuid ?? "mock-reissue.invalid");
+                            var (realNotBefore, realNotAfter) = GetCertificateValidity(certString);
+                            var mockCertString = GenerateMockReissueCertificate(
+                                currentResponseItem?.CommonName ?? currentResponseItem?.Uuid ?? "mock-reissue.invalid",
+                                realNotBefore, realNotAfter);
                             // AnyGatewayCore's CertificateService.CreateOrUpdateCertificate only writes a cert into a
                             // row the first time it's populated - if a row for this CARequestID already has a cert,
                             // it logs "The existing certificate will be preserved" and leaves it alone, with no
                             // config to override that. Reusing currentResponseItem.Uuid here would collide with the
-                            // real cert's row and be silently dropped. Deriving the CARequestID from the mock cert's
-                            // serial number (always different, since it's freshly generated each call) gives every
-                            // sync run's duplicate its own new row, instead of colliding with a fixed suffix's row
-                            // from a prior sync, at the cost of diverging from CSC's real same-UUID reissue continuity.
-                            var mockCARequestId = $"{currentResponseItem?.Uuid}-mock-{mockSerialNumber}";
+                            // real cert's row and be silently dropped, so give the duplicate a derived, but fixed,
+                            // CARequestID of its own. Fixed (not varying per sync) is deliberate: once the mock row
+                            // exists, later syncs should just find it and leave it alone via the same preserve
+                            // behavior, not keep creating new rows every sync. Matching the real cert's NotBefore/
+                            // NotAfter instead of "now" also keeps the mock cert's dates stable across sync runs.
+                            var mockCARequestId = $"{currentResponseItem?.Uuid}-mock-reissue";
                             Logger.LogWarning(
                                 "MockReissueRun: injecting synthetic mid-cycle-reissue duplicate for {Uuid} ({CommonName}) under derived CARequestID {MockCARequestId}",
                                 currentResponseItem?.Uuid, currentResponseItem?.CommonName, mockCARequestId);
@@ -904,18 +907,24 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
             .ToList();
     }
 
+    // Test/diagnostic only - see Constants.MockReissueRun. Reads the real leaf cert's own
+    // NotBefore/NotAfter so the synthetic mid-cycle-reissue duplicate can match them instead of
+    // using "now", keeping the mock cert's dates stable across sync runs.
+    private static (DateTimeOffset NotBefore, DateTimeOffset NotAfter) GetCertificateValidity(string base64DerCert)
+    {
+        using var cert = new X509Certificate2(Convert.FromBase64String(base64DerCert));
+        return (cert.NotBefore, cert.NotAfter);
+    }
+
     // Test/diagnostic only - see Constants.MockReissueRun. Generates a self-signed leaf cert with
     // a brand-new key pair for the given common name, standing in for a CSC mid-cycle reissue we
-    // never got a CSR for (so there's no real key to reuse, unlike a reissue we initiated). Also
-    // returns the cert's serial number, which the caller uses to derive a CARequestID that's
-    // unique per sync run (a fixed suffix would collide with its own prior mock row on the next
-    // sync, hitting the same "existing certificate will be preserved" problem again).
-    private static (string CertString, string SerialNumber) GenerateMockReissueCertificate(string commonName)
+    // never got a CSR for (so there's no real key to reuse, unlike a reissue we initiated).
+    private static string GenerateMockReissueCertificate(string commonName, DateTimeOffset notBefore, DateTimeOffset notAfter)
     {
         using var rsa = RSA.Create(2048);
         var req = new CertificateRequest($"CN={commonName}", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
-        using var cert = req.CreateSelfSigned(DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddDays(365));
-        return (Convert.ToBase64String(cert.Export(X509ContentType.Cert)), cert.SerialNumber);
+        using var cert = req.CreateSelfSigned(notBefore, notAfter);
+        return Convert.ToBase64String(cert.Export(X509ContentType.Cert));
     }
 
     #region PRIVATE

@@ -529,17 +529,16 @@ public class CSCGlobalCAPluginTests
 
         var items = buffer.ToList();
 
-        // real-1 is ACTIVE -> gets a synthetic reissue duplicate injected under a CARequestID
-        // derived from the mock cert's serial number (AnyGatewayCore's CertificateService
-        // preserves the first cert written to a row and silently drops any later cert for the
-        // same CARequestID, so the duplicate must land in its own row to be observable, and must
-        // vary per run so it doesn't collide with a prior sync's mock row). real-2 is REVOKED ->
-        // no injection.
+        // real-1 is ACTIVE -> gets a synthetic reissue duplicate injected under a derived,
+        // fixed CARequestID (AnyGatewayCore's CertificateService preserves the first cert written
+        // to a row and silently drops any later cert for the same CARequestID, so the duplicate
+        // must land in its own row to be observable; the ID is fixed, not varying per run, so a
+        // later sync finds the same row and leaves it alone instead of piling up new rows).
+        // real-2 is REVOKED -> no injection.
         Assert.Equal(3, items.Count);
         Assert.Single(items, i => i.CARequestID == "real-1");
         Assert.Single(items, i => i.CARequestID == "real-2");
-        var mockItem = Assert.Single(items, i => i.CARequestID != "real-1" && i.CARequestID != "real-2");
-        Assert.StartsWith("real-1-mock-", mockItem.CARequestID);
+        var mockItem = Assert.Single(items, i => i.CARequestID == "real-1-mock-reissue");
         var realItem = items.Single(i => i.CARequestID == "real-1");
         Assert.NotEqual(realItem.Certificate, mockItem.Certificate);
     }
