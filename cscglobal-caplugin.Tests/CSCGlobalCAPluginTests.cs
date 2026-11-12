@@ -505,8 +505,13 @@ public class CSCGlobalCAPluginTests
     }
 
     [Fact]
-    public async Task Synchronize_MockReissueRunEnabled_InjectsSyntheticDuplicateForEachActiveCert()
+    public async Task Synchronize_MockReissueRunEnabled_FirstSyncPassesRealCertThenReplacesOnLaterSyncs()
     {
+        // Real CSC mid-cycle reissues aren't a second record - CSC returns the same UUID's single
+        // record with its certificate field swapped. Use fresh UUIDs per test so the static
+        // "already seen" tracking doesn't leak across test runs in the same process.
+        var activeUuid = Guid.NewGuid().ToString();
+        var revokedUuid = Guid.NewGuid().ToString();
         var (_, pem) = MakeSelfSignedCert();
         var apiCert = ToApiBase64(pem);
 
@@ -515,32 +520,35 @@ public class CSCGlobalCAPluginTests
         {
             Results = new List<CertificateResponse>
             {
-                new CertificateResponse { Uuid = "real-1", CommonName = "real1.example.com", Status = "ACTIVE", CertificateType = "CSC TrustedSecure DV", Certificate = apiCert },
-                new CertificateResponse { Uuid = "real-2", CommonName = "real2.example.com", Status = "REVOKED", CertificateType = "CSC TrustedSecure DV", Certificate = apiCert }
+                new CertificateResponse { Uuid = activeUuid, CommonName = "real1.example.com", Status = "ACTIVE", CertificateType = "CSC TrustedSecure DV", Certificate = apiCert },
+                new CertificateResponse { Uuid = revokedUuid, CommonName = "real2.example.com", Status = "REVOKED", CertificateType = "CSC TrustedSecure DV", Certificate = apiCert }
             }
         });
 
         var data = ValidConnectionData();
         data[Constants.MockReissueRun] = "true";
-        var plugin = MakePlugin(mockClient, connectionData: data);
-        var buffer = new BlockingCollection<AnyCAPluginCertificate>();
 
-        await plugin.Synchronize(buffer, null, true, CancellationToken.None);
+        var firstSyncBuffer = new BlockingCollection<AnyCAPluginCertificate>();
+        await MakePlugin(mockClient, connectionData: data).Synchronize(firstSyncBuffer, null, true, CancellationToken.None);
+        var firstSyncItems = firstSyncBuffer.ToList();
 
-        var items = buffer.ToList();
+        // First sync: exactly one record per UUID.
+        Assert.Equal(2, firstSyncItems.Count);
+        var firstActive = Assert.Single(firstSyncItems, i => i.CARequestID == activeUuid);
+        var firstRevoked = Assert.Single(firstSyncItems, i => i.CARequestID == revokedUuid);
 
-        // real-1 is ACTIVE -> gets a synthetic reissue duplicate injected under a derived,
-        // fixed CARequestID (AnyGatewayCore's CertificateService preserves the first cert written
-        // to a row and silently drops any later cert for the same CARequestID, so the duplicate
-        // must land in its own row to be observable; the ID is fixed, not varying per run, so a
-        // later sync finds the same row and leaves it alone instead of piling up new rows).
-        // real-2 is REVOKED -> no injection.
-        Assert.Equal(3, items.Count);
-        Assert.Single(items, i => i.CARequestID == "real-1");
-        Assert.Single(items, i => i.CARequestID == "real-2");
-        var mockItem = Assert.Single(items, i => i.CARequestID == "real-1-mock-reissue");
-        var realItem = items.Single(i => i.CARequestID == "real-1");
-        Assert.NotEqual(realItem.Certificate, mockItem.Certificate);
+        var secondSyncBuffer = new BlockingCollection<AnyCAPluginCertificate>();
+        await MakePlugin(mockClient, connectionData: data).Synchronize(secondSyncBuffer, null, true, CancellationToken.None);
+        var secondSyncItems = secondSyncBuffer.ToList();
+
+        // Second sync: still exactly one record per UUID (no pileup), but the ACTIVE cert's
+        // content is now the synthetic reissue replacement under the same CARequestID.
+        // REVOKED is never eligible for the swap, so its content is unchanged between syncs.
+        Assert.Equal(2, secondSyncItems.Count);
+        var secondActive = Assert.Single(secondSyncItems, i => i.CARequestID == activeUuid);
+        Assert.NotEqual(firstActive.Certificate, secondActive.Certificate);
+        var secondRevoked = Assert.Single(secondSyncItems, i => i.CARequestID == revokedUuid);
+        Assert.Equal(firstRevoked.Certificate, secondRevoked.Certificate);
     }
 
     [Fact]

@@ -27,6 +27,12 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
     private readonly ILogger Logger;
     private ICertificateDataReader _certificateDataReader;
 
+    // Test/diagnostic only - see Constants.MockReissueRun. A new plugin instance is created per
+    // sync, so these need to be static to remember "have we already passed the real cert through
+    // for this UUID" across sync runs within the host process.
+    private static readonly ConcurrentDictionary<string, bool> MockReissueSeenUuids = new();
+    private static readonly ConcurrentDictionary<string, string> MockReissueCertCache = new();
+
     public CSCGlobalCAPlugin()
     {
         Logger = LogHandler.GetClassLogger<CSCGlobalCAPlugin>();
@@ -256,44 +262,43 @@ public class CSCGlobalCAPlugin : IAnyCAPlugin
                     var certString = GetEndEntityCertificate(certData);
                     if (certString.Length > 0)
                     {
+                        // Test/diagnostic only - see Constants.MockReissueRun. A real CSC mid-cycle
+                        // reissue isn't a second record - CSC just returns the same UUID's single
+                        // record with its certificate field swapped for a new one. Reproduce that
+                        // shape here: the first sync for a given UUID passes the real cert through
+                        // untouched; every sync after that substitutes a synthetic replacement
+                        // cert in its place, same CARequestID, no extra row. This also means the
+                        // mock faithfully hits the same "existing certificate will be preserved"
+                        // gateway behavior a real reissue would - that's expected, not a bug in
+                        // this mock.
+                        var certToQueue = certString;
+                        if (MockReissueRun && certStatus == Convert.ToInt32(EndEntityStatus.GENERATED))
+                        {
+                            var uuid = currentResponseItem?.Uuid ?? string.Empty;
+                            if (!MockReissueSeenUuids.TryAdd(uuid, true))
+                            {
+                                certToQueue = MockReissueCertCache.GetOrAdd(uuid, _ =>
+                                {
+                                    var (realNotBefore, realNotAfter) = GetCertificateValidity(certString);
+                                    Logger.LogWarning(
+                                        "MockReissueRun: replacing certificate for {Uuid} ({CommonName}) with a synthetic mid-cycle-reissue cert",
+                                        currentResponseItem?.Uuid, currentResponseItem?.CommonName);
+                                    return GenerateMockReissueCertificate(
+                                        currentResponseItem?.CommonName ?? currentResponseItem?.Uuid ?? "mock-reissue.invalid",
+                                        realNotBefore, realNotAfter);
+                                });
+                            }
+                        }
+
                         Logger.LogTrace($"Queueing Certificate ID {currentResponseItem?.Uuid} with ProductID '{productId ?? "(null)"}'");
                         blockingBuffer.Add(new AnyCAPluginCertificate
                         {
                             CARequestID = $"{currentResponseItem?.Uuid}",
-                            Certificate = certString,
+                            Certificate = certToQueue,
                             Status = certStatus,
                             ProductID = productId
                         }, cancelToken);
                         queuedCount++;
-
-                        if (MockReissueRun && certStatus == Convert.ToInt32(EndEntityStatus.GENERATED))
-                        {
-                            var (realNotBefore, realNotAfter) = GetCertificateValidity(certString);
-                            var mockCertString = GenerateMockReissueCertificate(
-                                currentResponseItem?.CommonName ?? currentResponseItem?.Uuid ?? "mock-reissue.invalid",
-                                realNotBefore, realNotAfter);
-                            // AnyGatewayCore's CertificateService.CreateOrUpdateCertificate only writes a cert into a
-                            // row the first time it's populated - if a row for this CARequestID already has a cert,
-                            // it logs "The existing certificate will be preserved" and leaves it alone, with no
-                            // config to override that. Reusing currentResponseItem.Uuid here would collide with the
-                            // real cert's row and be silently dropped, so give the duplicate a derived, but fixed,
-                            // CARequestID of its own. Fixed (not varying per sync) is deliberate: once the mock row
-                            // exists, later syncs should just find it and leave it alone via the same preserve
-                            // behavior, not keep creating new rows every sync. Matching the real cert's NotBefore/
-                            // NotAfter instead of "now" also keeps the mock cert's dates stable across sync runs.
-                            var mockCARequestId = $"{currentResponseItem?.Uuid}-mock-reissue";
-                            Logger.LogWarning(
-                                "MockReissueRun: injecting synthetic mid-cycle-reissue duplicate for {Uuid} ({CommonName}) under derived CARequestID {MockCARequestId}",
-                                currentResponseItem?.Uuid, currentResponseItem?.CommonName, mockCARequestId);
-                            blockingBuffer.Add(new AnyCAPluginCertificate
-                            {
-                                CARequestID = mockCARequestId,
-                                Certificate = mockCertString,
-                                Status = certStatus,
-                                ProductID = productId
-                            }, cancelToken);
-                            queuedCount++;
-                        }
                     }
                     else
                     {
